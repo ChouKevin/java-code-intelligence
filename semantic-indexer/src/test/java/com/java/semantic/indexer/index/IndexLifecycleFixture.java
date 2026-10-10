@@ -24,6 +24,7 @@ public final class IndexLifecycleFixture {
     public final IndexGarbageCollector collector;
     public final SemanticIndexManager manager;
     public final PreparationCoordinator coordinator;
+    public final ResolutionInputStore inputs;
     private final FileSourceJobStore sourceJobs;
     private final SourcePublicationStore sources;
 
@@ -36,12 +37,14 @@ public final class IndexLifecycleFixture {
         jobs = new FileSemanticIndexJobStore(properties, mapper, ownership);
         publications = configuration.indexPublications(properties, mapper, ownership, sources, registry);
         IndexSourceAccess access = new IndexSourceAccess(sources, registry, properties);
-        manager = new SemanticIndexManager(jobs, access, new SqliteIndexBuilder(mapper, new JavaSyntaxExtractor()), publications, properties);
+        inputs = new ResolutionInputStore(properties, mapper, new PlatformIdentity(), registry);
+        manager = new SemanticIndexManager(jobs, access,
+                new IndexBuildExecutor(mapper, inputs, new PlatformIdentity(), properties), publications, properties, inputs);
         retention = new IndexRetentionStore(properties, mapper, ownership, registry);
         collector = new IndexGarbageCollector(properties, registry, sources, new SourceRetentionStore(properties, mapper, registry),
                 publications, retention, mapper, clock);
         coordinator = new PreparationCoordinator(sourceJobs, jobs, new SourcePreparationService(sourceJobs, sources, registry),
-                access, publications, registry);
+                access, publications, registry, inputs, properties);
     }
 
     public IndexJobDispatcher dispatcher(RepositorySourceManager sourceManager, SourceGarbageCollector sourceCollector) {

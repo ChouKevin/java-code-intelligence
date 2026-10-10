@@ -2,7 +2,7 @@ package com.java.semantic.mcp;
 
 import java.util.List;
 
-/** The five published-source and three syntax-index operations are read-only. */
+/** Nine published-source and immutable-index operations; all are read-only. */
 public final class SemanticMcpToolCatalog {
     private static final List<ToolDefinition> TOOLS = List.of(
             new ToolDefinition("list_repositories",
@@ -20,7 +20,9 @@ public final class SemanticMcpToolCatalog {
             new ToolDefinition("get_outline",
                     "Return declarations and parse status for an existing path under the exact context from get_context; semanticStatus must be READY. Use search_code for declaration names, search_text for occurrences, list_entry_points for candidates, and read_source to verify original bytes. Ranges are raw UTF-8 [startByte,endByte) and one-based LF lines; syntax-only parse failures and partial coverage are not resolved behavior or proof of absence. Preserve context, path, generation and cursor unchanged; never switch revisions or prepare implicitly. Authorized Indexer uses a new requestId and get_job with that original ID after uncertain acceptance."),
             new ToolDefinition("list_entry_points",
-                    "List documented main, Spring mapping, Scheduled and Rabbit syntax candidates for the exact context from get_context; semanticStatus must be READY. Candidates are not confirmed runtime endpoints, and ambiguous evidence or partial coverage never proves absence. Use search_code for names, search_text for occurrences and read_source to verify bytes. Preserve context, generation, candidateKinds, directory and cursor unchanged; never switch revisions or prepare implicitly. Authorized Indexer uses a new requestId and get_job with that original ID after uncertain acceptance."));
+                    "List documented main, Spring mapping, Scheduled and Rabbit syntax candidates for the exact context from get_context; semanticStatus must be READY. Candidates are not confirmed runtime endpoints, and partial coverage never proves absence. Verify original bytes with read_source; preserve context, generation, filters and cursor. Never prepare or switch revisions implicitly."),
+            new ToolDefinition("find_relations",
+                    "Read static Java relations and framework candidate evidence at an exact context and mandatory indexGeneration. All relation enums are case-sensitive uppercase: direction is INCOMING or OUTGOING. Anchor is {kind: SOURCE_SYMBOL, symbolId: ...} for either direction, {kind: EXTERNAL_TARGET, targetId: ...} for INCOMING only, or {kind: FILE, path: ...} for OUTGOING only. Optional filters are relationKinds, resolutionStates and directory; the field is relationKinds, not kinds. relationKinds accepts CALL, CONSTRUCT, METHOD_REFERENCE, EXTENDS, IMPLEMENTS, OVERRIDES, REFERENCE, HTTP_EVIDENCE, EVENT_EVIDENCE and DB_EVIDENCE. resolutionStates accepts STATIC_RESOLVED, CANDIDATE and UNRESOLVED. limit is 1-100. Incoming matches exact indexed targets, never unresolved name guesses. Scope tags distinguish lambda/initializer provenance from direct execution. STATIC_RESOLVED is static resolution, not runtime dispatch; CANDIDATE is uncertain and UNRESOLVED has no target. Missing coverage and empty results never prove no callers. Verify raw source before behavioral claims. Preserve anchor, direction, all filters, limit and cursor on continuation. An INVALID_ARGUMENT request may be corrected to the documented schema while retaining exact context/generation; never blindly retry an unchanged failed request, prepare, remove pins or switch current implicitly."));
 
     private SemanticMcpToolCatalog() { }
 

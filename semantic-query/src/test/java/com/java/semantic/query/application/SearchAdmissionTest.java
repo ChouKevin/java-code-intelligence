@@ -83,6 +83,14 @@ class SearchAdmissionTest {
             assertThat(thirdError.get()).isInstanceOfSatisfying(SourceQueryException.class,
                     error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_BUSY));
             assertThat(admissions.get()).isEqualTo(2);
+            com.java.semantic.model.index.RelationContract.Request relations = new com.java.semantic.model.index.RelationContract.Request(
+                    context, "00000000-0000-0000-0000-000000000001",
+                    new com.java.semantic.model.index.RelationContract.FileAnchor(com.java.semantic.model.index.RelationContract.AnchorKind.FILE, "A.java"),
+                    com.java.semantic.model.index.RelationContract.Direction.OUTGOING, java.util.List.of(), java.util.List.of(), "", 20, Optional.empty());
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> facade.findRelations(relations))
+                    .isInstanceOfSatisfying(com.java.semantic.model.index.IndexFailure.class,
+                            failure -> assertThat(failure.code()).isEqualTo(com.java.semantic.model.index.IndexFailure.Code.INDEX_BUSY));
+            assertThat(admissions.get()).isEqualTo(2);
             firstExit.countDown();
             first.join(2000);
             assertThat(first.isAlive()).isFalse();

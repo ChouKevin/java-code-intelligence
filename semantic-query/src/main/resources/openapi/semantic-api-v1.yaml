@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Published source and syntax Query API",
+    "title": "Published source, syntax and static Relations Query API",
     "version": "1.0.0",
-    "description": "Eight read-only Query operations use exact repositoryId plus a full 40-character lowercase revision. Source readiness and independent syntax-index readiness/coverage remain separate; Query never prepares an index or switches revisions. Use search_text for literal source occurrences, search_code for declaration names, get_outline for known-file structure, and read_source to verify original bytes or navigate Java with explicit folds. list_files supports bounded depth-2 previews; read_source returns provenance-bound source/elision segments. Default page size 20 (maximum 100); syntax-index results are limited to 163840 UTF-8 JSON bytes and 524288 serialized MCP CallToolResult bytes. Source reads default to 200 lines per page, maximum 500, and 65536 source-content bytes."
+    "description": "Nine read-only Query operations use exact repositoryId plus a full 40-character lowercase revision. Source readiness and independent index readiness/coverage remain separate; Query never prepares an index or switches revisions. Use search_text for literal source occurrences, search_code for declaration names, get_outline for structure, find_relations for generation-pinned static declaration or candidate framework evidence, and read_source to verify original bytes or navigate Java with explicit folds. Static resolution is not runtime dispatch. list_files supports bounded depth-2 previews; read_source returns provenance-bound source/elision segments. Default page size 20 (maximum 100); index results are limited to 163840 UTF-8 JSON bytes and 524288 serialized MCP CallToolResult bytes. Source reads default to 200 lines per page, maximum 500, and 65536 source-content bytes."
   },
   "security": [
     {
@@ -675,6 +675,116 @@
         }
       }
     }
+,
+      "/api/v1/relations": {
+        "post": {
+          "operationId": "find_relations",
+          "summary": "Read exact-generation static relations and framework candidates.",
+          "description": "Mandatory context and indexGeneration; never follows latest. Relation enums are case-sensitive uppercase: direction INCOMING or OUTGOING. FILE requires OUTGOING; EXTERNAL_TARGET requires INCOMING. Incoming is exact target identity, not unresolved name matching. Preserve all filters and limit on continuation. Scope tags distinguish lambda/initializer provenance. Empty results and missing coverage do not prove no callers; verify raw source. Correct INVALID_ARGUMENT fields against the schema with the same exact pins; never blindly repeat unchanged failures, prepare, remove pins or switch current implicitly. Complete response 163840 bytes; MCP 524288 bytes.",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindRelationsRequest"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Whole static facts with exact provenance; same result as MCP.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/RelationResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "Invalid tagged anchor, direction, filters, limit or cursor.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SemanticQueryError"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Query token required.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/QuerySecurityError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Query disabled.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/QuerySecurityError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Exact generation expired or anchor not found (INDEX_SYMBOL_NOT_FOUND).",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SemanticQueryError"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "Known generation lacks Relations (INDEX_CAPABILITY_UNAVAILABLE).",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SemanticQueryError"
+                  }
+                }
+              }
+            },
+            "413": {
+              "description": "Whole row or metadata exceeds result budget.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SemanticQueryError"
+                  }
+                }
+              }
+            },
+            "503": {
+              "description": "Index unavailable or shared search permits busy.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SemanticQueryError"
+                  }
+                }
+              }
+            },
+            "504": {
+              "description": "Five-second index deadline exceeded.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/SemanticQueryError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
   },
   "components": {
     "securitySchemes": {
@@ -1304,8 +1414,8 @@
       "IndexProfile": {
         "type": "object",
         "properties": {
-          "schemaVersion": { "type": "integer", "enum": [1, 2], "description": "Known profile schema versions; only exact paired 1/1 legacy and 2/2 fold-capable profiles are supported." },
-          "policyVersion": { "type": "integer", "enum": [1, 2], "description": "Known profile policy versions; profile 1/1 remains syntax-readable without folds, while newly built fold-capable indexes use 2/2." },
+          "schemaVersion": { "type": "integer", "enum": [1, 2, 3], "description": "Known paired profiles: 1/1 syntax, 2/2 syntax with folds, 3/3 static Relations with syntax and folds." },
+          "policyVersion": { "type": "integer", "enum": [1, 2, 3], "description": "Known paired policy versions; Relations is opt-in for new 3/3 builds and does not rewrite legacy generations." },
           "engine": { "type": "string", "description": "Parser engine name." },
           "version": { "type": "string", "description": "Parser engine version." },
           "languageLevel": { "type": "string", "description": "Configured Java language level." },
@@ -1330,15 +1440,867 @@
         "required": ["javaFiles", "parsedFiles", "failedFiles", "unsupportedFiles", "tooLargeFiles", "declarations", "complete"],
         "additionalProperties": false
       },
+        "IndexCapabilities": {
+          "type": "object",
+          "properties": {
+            "syntax": {
+              "type": "boolean"
+            },
+            "folds": {
+              "type": "boolean"
+            },
+            "relations": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "syntax",
+            "folds",
+            "relations"
+          ],
+          "additionalProperties": false
+        },
+        "RelationAnchor": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "SOURCE_SYMBOL"
+                },
+                "symbolId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "kind",
+                "symbolId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "EXTERNAL_TARGET"
+                },
+                "targetId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "kind",
+                "targetId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "FILE"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "kind",
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "RelationScope": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "DECLARATION",
+                "METHOD",
+                "CONSTRUCTOR",
+                "LAMBDA",
+                "ANONYMOUS_METHOD",
+                "STATIC_INITIALIZER",
+                "INSTANCE_INITIALIZER",
+                "FIELD_INITIALIZER",
+                "FILE"
+              ]
+            },
+            "range": {
+              "$ref": "#/components/schemas/SourceSpan"
+            }
+          },
+          "required": [
+            "kind",
+            "range"
+          ],
+          "additionalProperties": false
+        },
+        "RelationSourceSite": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "blobId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "contentDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "range": {
+              "$ref": "#/components/schemas/SourceSpan"
+            },
+            "containerSymbolId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executionScope": {
+              "$ref": "#/components/schemas/RelationScope"
+            }
+          },
+          "required": [
+            "path",
+            "blobId",
+            "contentDigest",
+            "byteLength",
+            "range",
+            "executionScope"
+          ],
+          "additionalProperties": false
+        },
+        "ExternalRelationTarget": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "artifactId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "artifactDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "module": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "declarationKind": {
+              "type": "string",
+              "enum": [
+                "CLASS",
+                "INTERFACE",
+                "ENUM",
+                "RECORD",
+                "ANNOTATION_TYPE",
+                "METHOD",
+                "CONSTRUCTOR",
+                "FIELD",
+                "ENUM_CONSTANT",
+                "RECORD_COMPONENT"
+              ]
+            },
+            "qualifiedOwner": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "targetId",
+            "artifactId",
+            "artifactDigest",
+            "declarationKind",
+            "qualifiedOwner",
+            "name",
+            "signature"
+          ],
+          "additionalProperties": false
+        },
+        "SourceRelationTarget": {
+          "type": "object",
+          "properties": {
+            "declaration": {
+              "$ref": "#/components/schemas/Declaration"
+            },
+            "qualifiedSignature": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "declaration"
+          ],
+          "additionalProperties": false
+        },
+        "RelationTarget": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "SOURCE_SYMBOL"
+                },
+                "source": {
+                  "$ref": "#/components/schemas/SourceRelationTarget"
+                },
+                "external": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "kind",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "EXTERNAL_TARGET"
+                },
+                "external": {
+                  "$ref": "#/components/schemas/ExternalRelationTarget"
+                },
+                "source": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "kind",
+                "external"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "FrameworkRelationEvidence": {
+          "type": "object",
+          "properties": {
+            "recognizerId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spelling": {
+              "type": "string",
+              "minLength": 1
+            },
+            "recognitionBasis": {
+              "type": "string",
+              "minLength": 1
+            },
+            "literalValues": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "unresolvedMembers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "bindingUncertainties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "supportingEvidence": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/RelationSourceSite"
+              }
+            }
+          },
+          "required": [
+            "recognizerId",
+            "spelling",
+            "recognitionBasis",
+            "literalValues",
+            "unresolvedMembers",
+            "bindingUncertainties",
+            "supportingEvidence"
+          ],
+          "additionalProperties": false
+        },
+        "RelationFact": {
+          "type": "object",
+          "properties": {
+            "relationId": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "CALL",
+                "CONSTRUCT",
+                "METHOD_REFERENCE",
+                "EXTENDS",
+                "IMPLEMENTS",
+                "OVERRIDES",
+                "REFERENCE",
+                "HTTP_EVIDENCE",
+                "EVENT_EVIDENCE",
+                "DB_EVIDENCE"
+              ]
+            },
+            "source": {
+              "$ref": "#/components/schemas/RelationSourceSite"
+            },
+            "resolutionState": {
+              "type": "string",
+              "enum": [
+                "STATIC_RESOLVED",
+                "CANDIDATE",
+                "UNRESOLVED"
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unresolvedReason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "MISSING_TYPE",
+                    "AMBIGUOUS_TARGET",
+                    "UNSUPPORTED_CONSTRUCT",
+                    "DUPLICATE_SOURCE_TYPE",
+                    "NO_WRITTEN_DECLARATION"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "framework": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FrameworkRelationEvidence"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "relationId",
+            "kind",
+            "source",
+            "resolutionState"
+          ],
+          "additionalProperties": false
+        },
+        "RelationCoverage": {
+          "type": "object",
+          "properties": {
+            "scopeFiles": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "processedFiles": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "skippedFiles": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "outsideScopeJavaFiles": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "callOccurrences": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "resolvedCallOccurrences": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fileCounts": {
+              "type": "object",
+              "properties": {
+                "ANALYZED": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "OUT_OF_SCOPE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "PARSE_FAILED": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "UNSUPPORTED": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "TOO_LARGE": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "kindCounts": {
+              "type": "object",
+              "properties": {
+                "CALL": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "CONSTRUCT": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "METHOD_REFERENCE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "EXTENDS": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "IMPLEMENTS": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "OVERRIDES": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "REFERENCE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "HTTP_EVIDENCE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "EVENT_EVIDENCE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "DB_EVIDENCE": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "stateCounts": {
+              "type": "object",
+              "properties": {
+                "STATIC_RESOLVED": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "CANDIDATE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "UNRESOLVED": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "reasonCounts": {
+              "type": "object",
+              "properties": {
+                "MISSING_TYPE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "AMBIGUOUS_TARGET": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "UNSUPPORTED_CONSTRUCT": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "DUPLICATE_SOURCE_TYPE": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "NO_WRITTEN_DECLARATION": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "extractionComplete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "scopeFiles",
+            "processedFiles",
+            "skippedFiles",
+            "outsideScopeJavaFiles",
+            "callOccurrences",
+            "resolvedCallOccurrences",
+            "fileCounts",
+            "kindCounts",
+            "stateCounts",
+            "reasonCounts",
+            "extractionComplete"
+          ],
+          "additionalProperties": false
+        },
+        "ResolutionPlatform": {
+          "type": "object",
+          "properties": {
+            "javaVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "vendor": {
+              "type": "string",
+              "minLength": 1
+            },
+            "releaseDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "modulesDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "javaVersion",
+            "vendor",
+            "releaseDigest",
+            "modulesDigest"
+          ],
+          "additionalProperties": false
+        },
+        "ResolutionArtifact": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "order": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "digest",
+            "byteLength",
+            "order"
+          ],
+          "additionalProperties": false
+        },
+        "ResolutionProvenance": {
+          "type": "object",
+          "properties": {
+            "analysisPlanDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "platform": {
+              "$ref": "#/components/schemas/ResolutionPlatform"
+            },
+            "sourceRoots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ResolutionArtifact"
+              }
+            }
+          },
+          "required": [
+            "analysisPlanDigest",
+            "platform",
+            "sourceRoots",
+            "artifacts"
+          ],
+          "additionalProperties": false
+        },
+        "RelationFileAnalysis": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "$ref": "#/components/schemas/FileOutcome"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ANALYZED",
+                "OUT_OF_SCOPE",
+                "PARSE_FAILED",
+                "UNSUPPORTED",
+                "TOO_LARGE"
+              ]
+            }
+          },
+          "required": [
+            "file",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "FindRelationsRequest": {
+          "type": "object",
+          "allOf": [
+            {
+              "if": { "properties": { "anchor": { "properties": { "kind": { "const": "FILE" } } } } },
+              "then": { "properties": { "direction": { "const": "OUTGOING" } } }
+            },
+            {
+              "if": { "properties": { "anchor": { "properties": { "kind": { "const": "EXTERNAL_TARGET" } } } } },
+              "then": { "properties": { "direction": { "const": "INCOMING" } } }
+            }
+          ],
+          "properties": {
+            "context": {
+              "$ref": "#/components/schemas/SourceContext"
+            },
+            "indexGeneration": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "anchor": {
+              "$ref": "#/components/schemas/RelationAnchor"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "INCOMING",
+                "OUTGOING"
+              ]
+            },
+            "relationKinds": {
+              "type": "array",
+              "description": "Absent or empty means all kinds; values normalize by deduplication and enum order.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "CALL",
+                  "CONSTRUCT",
+                  "METHOD_REFERENCE",
+                  "EXTENDS",
+                  "IMPLEMENTS",
+                  "OVERRIDES",
+                  "REFERENCE",
+                  "HTTP_EVIDENCE",
+                  "EVENT_EVIDENCE",
+                  "DB_EVIDENCE"
+                ]
+              }
+            },
+            "resolutionStates": {
+              "type": "array",
+              "description": "Absent or empty means all states; values normalize by deduplication and enum order.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "STATIC_RESOLVED",
+                  "CANDIDATE",
+                  "UNRESOLVED"
+                ]
+              }
+            },
+            "directory": {
+              "type": "string",
+              "description": "Repository-relative directory subtree of occurrence paths, never target paths; empty means root."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "cursor": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Continuation bound to exact context, generation, tagged anchor, direction, all filters and limit."
+            }
+          },
+          "required": [
+            "context",
+            "indexGeneration",
+            "anchor",
+            "direction"
+          ],
+          "additionalProperties": false
+        },
+        "RelationResult": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "$ref": "#/components/schemas/SourceContext"
+            },
+            "indexGeneration": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "profile": {
+              "$ref": "#/components/schemas/IndexProfile"
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/IndexCapabilities"
+            },
+            "coverage": {
+              "$ref": "#/components/schemas/IndexCoverage"
+            },
+            "relationCoverage": {
+              "$ref": "#/components/schemas/RelationCoverage"
+            },
+            "resolutionProvenance": {
+              "$ref": "#/components/schemas/ResolutionProvenance"
+            },
+            "analysisLevel": {
+              "const": "STATIC"
+            },
+            "anchor": {
+              "$ref": "#/components/schemas/RelationAnchor"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "INCOMING",
+                "OUTGOING"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/RelationFact"
+              }
+            },
+            "page": {
+              "$ref": "#/components/schemas/Page"
+            },
+            "file": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationFileAnalysis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "context",
+            "indexGeneration",
+            "profile",
+            "capabilities",
+            "coverage",
+            "relationCoverage",
+            "resolutionProvenance",
+            "analysisLevel",
+            "anchor",
+            "direction",
+            "items",
+            "page"
+          ],
+          "additionalProperties": false
+        },
       "IndexSummary": {
         "type": "object",
         "description": "Optional selected syntax-index summary reported independently from source coverage.",
         "properties": {
           "indexGeneration": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Selected immutable index generation." },
           "profile": { "$ref": "#/components/schemas/IndexProfile", "description": "Parser and schema provenance." },
+          "capabilities": { "$ref": "#/components/schemas/IndexCapabilities" },
           "coverage": { "$ref": "#/components/schemas/IndexCoverage", "description": "Java-file and declaration coverage." }
         },
-        "required": ["indexGeneration", "profile", "coverage"],
+        "required": ["indexGeneration", "profile", "coverage", "capabilities"],
         "additionalProperties": false
       },
       "SourceSpan": {
@@ -1470,13 +2432,14 @@
           "context": { "$ref": "#/components/schemas/SourceContext", "description": "Exact source identity searched." },
           "indexGeneration": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Immutable index generation used for this result." },
           "profile": { "$ref": "#/components/schemas/IndexProfile", "description": "Parser and schema provenance." },
+          "capabilities": { "$ref": "#/components/schemas/IndexCapabilities" },
           "coverage": { "$ref": "#/components/schemas/IndexCoverage", "description": "Independent Java-file coverage; partial coverage does not prove absence." },
           "analysisLevel": { "type": "string", "enum": ["SYNTAX"], "description": "Syntax-only analysis; no type resolution or runtime conclusion." },
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/Declaration" }, "description": "Complete declaration rows in the documented stable order." },
           "page": { "$ref": "#/components/schemas/Page", "description": "Returned count and generation/filter-bound continuation state." },
           "file": { "anyOf": [{ "$ref": "#/components/schemas/FileOutcome" }, { "type": "null" }], "description": "Optional outline file status and safe diagnostics; absent/null for search_code." }
         },
-        "required": ["context", "indexGeneration", "profile", "coverage", "analysisLevel", "items", "page"],
+        "required": ["context", "indexGeneration", "profile", "capabilities", "coverage", "analysisLevel", "items", "page"],
         "additionalProperties": false
       },
       "IndexEntryPointResult": {
@@ -1486,13 +2449,14 @@
           "context": { "$ref": "#/components/schemas/SourceContext", "description": "Exact source identity searched." },
           "indexGeneration": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Immutable index generation used for this result." },
           "profile": { "$ref": "#/components/schemas/IndexProfile", "description": "Parser and schema provenance." },
+          "capabilities": { "$ref": "#/components/schemas/IndexCapabilities" },
           "coverage": { "$ref": "#/components/schemas/IndexCoverage", "description": "Independent Java-file coverage; partial coverage does not prove absence." },
           "analysisLevel": { "type": "string", "enum": ["SYNTAX"], "description": "Syntax-only analysis; candidates are not confirmed runtime endpoints." },
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/EntryCandidate" }, "description": "Syntax candidates in stable source order." },
           "page": { "$ref": "#/components/schemas/Page", "description": "Returned count and generation/filter-bound continuation state." },
           "file": { "anyOf": [{ "$ref": "#/components/schemas/FileOutcome" }, { "type": "null" }], "description": "Optional outline file status; null for entry-point listing." }
         },
-        "required": ["context", "indexGeneration", "profile", "coverage", "analysisLevel", "items", "page"],
+        "required": ["context", "indexGeneration", "profile", "capabilities", "coverage", "analysisLevel", "items", "page"],
         "additionalProperties": false
       },
       "SemanticQueryError": {
@@ -1518,6 +2482,8 @@
               "INDEX_GENERATION_EXPIRED",
               "INDEX_RESULT_TOO_LARGE",
               "INDEX_BUSY",
+              "INDEX_CAPABILITY_UNAVAILABLE",
+              "INDEX_SYMBOL_NOT_FOUND",
               "INDEX_TIMEOUT"
             ],
             "description": "Stable safe domain or request error code."

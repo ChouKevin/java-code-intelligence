@@ -2,6 +2,7 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.index.IndexFailure;
+import com.java.semantic.model.index.RelationContract;
 import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.query.index.RepositoryIndexPort;
 import com.java.semantic.model.source.SourceReadContract.ContextRequest;
@@ -54,6 +55,7 @@ public final class SemanticQueryFacade {
             case "search_code" -> searchCode(IndexQueryInput.searchCode(input));
             case "get_outline" -> getOutline(IndexQueryInput.outline(input));
             case "list_entry_points" -> listEntryPoints(IndexQueryInput.entryPoints(input));
+            case "find_relations" -> findRelations(RelationQueryInput.findRelations(input));
             default -> throw new IllegalArgumentException("unknown query operation");
         };
     }
@@ -101,6 +103,10 @@ public final class SemanticQueryFacade {
 
     public IndexContract.Result<IndexContract.EntryCandidate> listEntryPoints(IndexContract.EntryPointsRequest request) {
         return indexSearch(request.context(), admitted -> index.entryPoints(admitted, request));
+    }
+
+    public RelationContract.Result findRelations(RelationContract.Request request) {
+        return indexSearch(request.context(), admitted -> index.findRelations(admitted, request));
     }
 
     private <T> T indexSearch(SourceContext context, Function<AdmittedSourceRevision, T> operation) {

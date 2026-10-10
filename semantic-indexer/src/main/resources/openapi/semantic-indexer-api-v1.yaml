@@ -171,22 +171,23 @@ components:
       properties:
         formatVersion: {type: integer, minimum: 1, description: Index manifest format version.}
         context: {$ref: '#/components/schemas/SourceContext', description: Exact source repository and revision indexed.}
-        originFingerprint: {type: string, pattern: '^[0-9a-f]{64}$', description: One-way approved-origin fingerprint, not a Git URL or credential.}
+        originFingerprint: {type: string, pattern: '^[0-9a-f]{64}$', description: 'One-way approved-origin fingerprint, not a Git URL or credential.'}
         indexGeneration: {type: string, format: uuid, description: Immutable published index generation.}
         sourceManifestDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the exact published source manifest.}
         inventoryDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the authorized source inventory.}
         profile: {$ref: '#/components/schemas/IndexProfile', description: Parser and schema profile used to build this generation.}
         coverage: {$ref: '#/components/schemas/IndexCoverage', description: Java syntax-index coverage.}
-        databaseBytes: {type: integer, minimum: 1, maximum: 67108864, description: Sealed SQLite database size in bytes; maximum 67,108,864.}
+        databaseBytes: {type: integer, minimum: 1, maximum: 67108864, description: 'Sealed SQLite database size in bytes; maximum 67,108,864.'}
         databaseDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: SHA-256 digest of the sealed database artifact.}
         preparedAt: {type: string, format: date-time, description: Index build publication timestamp.}
+        analysisPlanDigest: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: Frozen public analysis-plan SHA-256 identity; required non-null for profile 3 and absent/null for profiles 1/2. No private input paths.}
     IndexProfile:
       type: object
       additionalProperties: false
       required: [schemaVersion, policyVersion, engine, version, languageLevel, unicodeEscapes, tabSize]
       properties:
-        schemaVersion: {type: integer, enum: [1, 2], description: Known reader profiles use schema 1 or 2; only paired 1/1 and 2/2 profiles are supported.}
-        policyVersion: {type: integer, enum: [1, 2], description: Known reader profiles use policy 1 or 2; only paired 1/1 and 2/2 profiles are supported.}
+        schemaVersion: {type: integer, enum: [1, 2, 3], description: 'Known paired profiles are 1/1 syntax, 2/2 with folds and 3/3 with static Relations.'}
+        policyVersion: {type: integer, enum: [1, 2, 3], description: Known paired profile policy version; new syntax-only builds use 2/2 and explicitly enabled Relations uses 3/3.}
         engine: {type: string, minLength: 1, description: Parser engine name.}
         version: {type: string, minLength: 1, description: Parser engine version.}
         languageLevel: {type: string, minLength: 1, description: Configured Java language level.}
@@ -201,8 +202,8 @@ components:
         parsedFiles: {type: integer, minimum: 0, description: Java files parsed successfully.}
         failedFiles: {type: integer, minimum: 0, description: Java files whose syntax parse failed.}
         unsupportedFiles: {type: integer, minimum: 0, description: Java files unsupported by this parser profile.}
-        tooLargeFiles: {type: integer, minimum: 0, description: Java files over 1,048,576 bytes.}
-        declarations: {type: integer, minimum: 0, maximum: 200000, description: Indexed declarations; maximum 200,000 per generation.}
+        tooLargeFiles: {type: integer, minimum: 0, description: 'Java files over 1,048,576 bytes.'}
+        declarations: {type: integer, minimum: 0, maximum: 200000, description: 'Indexed declarations; maximum 200,000 per generation.'}
         complete: {type: boolean, description: True exactly when every Java inventory file was parsed.}
     SourceContext:
       type: object
@@ -260,7 +261,7 @@ paths:
               required: [requestId]
               properties:
                 requestId: {type: string, format: uuid, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', description: Canonical UUID for this durable intent; persist before calling.}
-                revision: {type: string, pattern: '^[0-9a-f]{40}$', description: Optional exact full lowercase commit SHA; omission requests the configured default-branch refresh, while a supplied SHA is membership-only and never promotes current.}
+                revision: {type: string, pattern: '^[0-9a-f]{40}$', description: 'Optional exact full lowercase commit SHA; omission requests the configured default-branch refresh, while a supplied SHA is membership-only and never promotes current.'}
       responses:
         '202':
           description: Durable acceptance; inspect phase before treating source as READY.

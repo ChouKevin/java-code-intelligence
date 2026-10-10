@@ -1,6 +1,6 @@
 # Java Code Intelligence — Source MCP
 
-A source-first service for traceable evidence from an approved Git repository at an **exact commit**, with an optional lightweight Java syntax index. Java 21 and three modules remain: `semantic-indexer` privately fetches Git, publishes immutable source and builds separate sealed SQLite generations; `semantic-query` reads only published source/index through HTTP/MCP and real ripgrep; `semantic-model` contains JDK-only contracts. JavaParser runs only in Indexer. Neither service runs an LLM, MongoDB, target-repository build, symbol solver or business inference. The MCP reading/default-branch-current milestone is locally verified: 248 ordinary tests, the packaged native journey and an actual Codex/MCP reading/citation scenario passed. See [current evidence and release limits](docs/operations/testing.md#mcp-reading-and-current-local-evidence--2026-10-09). Earlier Phase 3 and business-discovery results, including six source-only model scenarios, remain historical evidence; none constitute release acceptance.
+A source-first service for traceable evidence from an approved Git repository at an **exact commit**, with optional Java syntax and static-relation indexes. Java 21 and three modules remain: `semantic-indexer` privately fetches Git, publishes immutable source and builds separate sealed SQLite generations; `semantic-query` reads only published source/index through HTTP/MCP and real ripgrep; `semantic-model` contains JDK-only contracts. JavaParser and its optional Symbol Solver run only in Indexer. Neither service runs an LLM, MongoDB, target-repository builds or business inference. The preceding MCP reading/default-branch-current milestone was locally verified: 248 ordinary tests, the packaged native journey and an actual Codex/MCP reading/citation scenario passed. See [historical evidence and release limits](docs/operations/testing.md#mcp-reading-and-current-local-evidence--2026-10-09). Relations acceptance is tracked separately in the [roadmap](docs/roadmap.md#phase-4--relations); prior results do not constitute Relations or release acceptance.
 
 The corrected query skill also delivered every checked repository/exact-SHA
 identity in all six final answers. The first-round omission and its fresh
@@ -17,6 +17,12 @@ storage fails closed; see [origin identity and rebuild rules](docs/operations/so
 Keep real repository registrations, the Query allowlist, credentials and MCP
 client settings local; the public repo contains only generic configuration and
 synthetic fixtures. See [local-only configuration and evidence](docs/operations/source-mcp.md#local-only-configuration-and-evidence).
+
+For agent-operated registration, dependency preparation and JavaParser enablement,
+load [onboard-repository](skills/onboard-repository/SKILL.md). It connects the
+operations guide into an authorized exact-revision workflow, distinguishes syntax
+from opt-in Relations, and requires Query-only acceptance. It does not authorize
+automatic downloads, target builds, existing-service restarts or description approval.
 
 For agent-assisted repository descriptions, read
 [describe-repository](skills/describe-repository/SKILL.md). It drafts a
@@ -71,9 +77,12 @@ switch to a rebuild or latest. Readiness and Java parse coverage are independent
 of source readiness. Syntax candidates are navigation evidence, not resolved
 runtime routes/calls; always confirm with `read_source` at the same SHA.
 
-New index generations use the fold-capable JavaParser schema/policy profile
-`2/2`; the known legacy `1/1` profile remains readable for syntax queries but
-has no fold capability. No existing generation is rewritten or upgraded in place.
+With Relations disabled (the default), new generations use fold-capable schema/policy
+`2/2`. Explicit Indexer Relations configuration selects `3/3`, with static Java
+declaration resolution against Java 21, admitted source roots and approved frozen
+local JARs. Profile `1/1` remains syntax-readable; `2/2` adds folds and `3/3` adds
+relations. No existing generation is rewritten or upgraded in place. See
+[Relations setup and safety](docs/operations/source-mcp.md#static-relations).
 
 Source policy **2** adds scheduled revision retention: non-current snapshots remain
 for at least 30 elapsed days after replacement; current is never reclaimed.
@@ -116,8 +125,9 @@ See the [MCP session lifecycle](docs/operations/source-mcp.md#mcp-session-lifecy
 | `search_code` | `POST /api/v1/search-code` (required literal `match: exact|prefix`) |
 | `get_outline` | `POST /api/v1/outline` |
 | `list_entry_points` | `POST /api/v1/entry-points` |
+| `find_relations` | `POST /api/v1/relations` (required exact `indexGeneration`) |
 
-`get_context` takes top-level `repositoryId` and optional exact `revision`; navigation uses nested `context` containing **only** `repositoryId` and `revision`. The three index tools optionally accept a top-level canonical UUID `indexGeneration`, separate from source context. No old CURRENT/REVIEW/fact/branch selector or legacy alias is supported. A registered but unprepared repository has no readable context. An optional externally reviewed [project guide](docs/operations/repository-context-prompt.md) is a `NOT_VERIFIED` navigation hint, never a fact or preparation gate.
+`get_context` takes top-level `repositoryId` and optional exact `revision`; navigation uses nested `context` containing **only** `repositoryId` and `revision`. The three syntax tools optionally accept a top-level canonical UUID `indexGeneration`; `find_relations` requires it on every page. Keep it separate from source context. No old CURRENT/REVIEW/fact/branch selector or legacy alias is supported. A registered but unprepared repository has no readable context. An optional externally reviewed [project guide](docs/operations/repository-context-prompt.md) is a `NOT_VERIFIED` navigation hint, never a fact or preparation gate.
 
 `list_files` defaults to one directory level. `depth: 2` returns a bounded flat
 preorder preview with at most 12 immediate children per direct-child directory;

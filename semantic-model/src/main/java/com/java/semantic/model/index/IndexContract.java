@@ -28,7 +28,8 @@ public final class IndexContract {
     public static final int MAX_TRANSPORT_BYTES = 524_288;
     public static final int MAX_DIAGNOSTICS = 100;
     private static final Profile LEGACY_PROFILE = new Profile(1, 1, "JavaParser", "3.28.2", "JAVA_21", true, 1);
-    private static final Profile CURRENT_PROFILE = new Profile(2, 2, "JavaParser", "3.28.2", "JAVA_21", true, 1);
+    private static final Profile SYNTAX_PROFILE = new Profile(2, 2, "JavaParser", "3.28.2", "JAVA_21", true, 1);
+    private static final Profile RELATIONS_PROFILE = new Profile(3, 3, "JavaParserSymbolSolver", "3.28.2", "JAVA_21", true, 1);
 
     private IndexContract() { }
 
@@ -37,11 +38,28 @@ public final class IndexContract {
     public enum Match { exact, prefix }
     public enum CandidateKind { MAIN, HTTP_MAPPING, SCHEDULED, RABBIT_LISTENER }
     public enum EvidenceKind { MAIN_SIGNATURE, FULLY_QUALIFIED, DIRECT_IMPORT, AMBIGUOUS_SIMPLE }
-    public enum AnalysisLevel { SYNTAX }
+    public enum AnalysisLevel { SYNTAX, STATIC }
 
-    public static Profile currentProfile() { return CURRENT_PROFILE; }
+    public record Capabilities(boolean syntax, boolean folds, boolean relations) {
+        public Capabilities {
+            ModelValidation.require(syntax && (!relations || folds), "invalid index capabilities");
+        }
+    }
+
+    public static Profile syntaxProfile() { return SYNTAX_PROFILE; }
+    public static Profile relationsProfile() { return RELATIONS_PROFILE; }
     public static boolean supportedProfile(Profile profile) {
-        return CURRENT_PROFILE.equals(profile) || LEGACY_PROFILE.equals(profile);
+        return SYNTAX_PROFILE.equals(profile) || LEGACY_PROFILE.equals(profile) || RELATIONS_PROFILE.equals(profile);
+    }
+    public static boolean supportsFolds(Profile profile) {
+        return SYNTAX_PROFILE.equals(profile) || RELATIONS_PROFILE.equals(profile);
+    }
+    public static boolean supportsRelations(Profile profile) {
+        return RELATIONS_PROFILE.equals(profile);
+    }
+    public static Capabilities capabilities(Profile profile) {
+        ModelValidation.require(supportedProfile(profile), "unsupported index profile");
+        return new Capabilities(true, supportsFolds(profile), supportsRelations(profile));
     }
 
     public record Profile(int schemaVersion, int policyVersion, String engine, String version,
@@ -173,7 +191,7 @@ public final class IndexContract {
             profile = Objects.requireNonNull(profile, "index profile");
             file = Objects.requireNonNull(file, "file outcome");
             folds = List.copyOf(Objects.requireNonNull(folds, "folds"));
-            ModelValidation.require(supportedProfile(profile) && foldCapable == profile.equals(CURRENT_PROFILE),
+            ModelValidation.require(supportedProfile(profile) && foldCapable == supportsFolds(profile),
                     "fold capability must match a supported profile");
             ModelValidation.require(folds.size() <= MAX_DECLARATIONS
                     && (foldCapable && file.status() == ParseStatus.PARSED || folds.isEmpty()),
@@ -221,11 +239,12 @@ public final class IndexContract {
         }
     }
 
-    public record IndexSummary(String indexGeneration, Profile profile, Coverage coverage) {
+    public record IndexSummary(String indexGeneration, Profile profile, Coverage coverage, Capabilities capabilities) {
         public IndexSummary {
             indexGeneration = requireGeneration(indexGeneration);
             profile = Objects.requireNonNull(profile, "index profile");
             coverage = Objects.requireNonNull(coverage, "index coverage");
+            ModelValidation.require(IndexContract.capabilities(profile).equals(capabilities), "profile capability mismatch");
         }
     }
 
@@ -275,7 +294,7 @@ public final class IndexContract {
     }
 
     public record Result<T>(SourceContext context, String indexGeneration, Profile profile,
-            Coverage coverage, AnalysisLevel analysisLevel, List<T> items,
+            Coverage coverage, AnalysisLevel analysisLevel, Capabilities capabilities, List<T> items,
             SourceReadContract.Page page, Optional<FileOutcome> file) {
         public Result {
             context = Objects.requireNonNull(context, "source context");
@@ -283,6 +302,7 @@ public final class IndexContract {
             profile = Objects.requireNonNull(profile, "index profile");
             coverage = Objects.requireNonNull(coverage, "index coverage");
             analysisLevel = Objects.requireNonNull(analysisLevel, "analysis level");
+            ModelValidation.require(IndexContract.capabilities(profile).equals(capabilities), "profile capability mismatch");
             items = List.copyOf(Objects.requireNonNull(items, "index result items"));
             page = Objects.requireNonNull(page, "result page");
             file = Objects.requireNonNull(file, "outline file outcome");
@@ -319,7 +339,7 @@ public final class IndexContract {
         Objects.requireNonNull(generation, "index generation").ifPresent(IndexContract::requireGeneration);
     }
 
-    private static String unicode(String value) {
+    static String unicode(String value) {
         Objects.requireNonNull(value, "Unicode text");
         for (int index = 0; index < value.length(); index++) {
             char character = value.charAt(index);

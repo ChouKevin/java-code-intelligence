@@ -1,12 +1,12 @@
 # Source／index MCP Agent 接受測試
 
-本文件區分 native 測試、真實獨立程序／容器、實際 OMP/Codex/Claude 模型客戶端與部署安全。**不能**以其中一層代替另一層；MCP 回傳可追溯來源與 syntax-only 宣告／候選，不產生已驗證業務推論或 finding。最新結果與未執行 gates 見 [testing](testing.md)。Query 不使用 Mongo、Git、JavaParser 或服務端模型。
+本文件區分 native 測試、真實獨立程序／容器、實際 OMP/Codex/Claude 模型客戶端與部署安全。**不能**以其中一層代替另一層；MCP 回傳可追溯來源、syntax 宣告及可選 static Relations，不產生已驗證業務推論、runtime call graph 或 finding。最新結果與未執行 gates 見 [testing](testing.md)。Query 不使用 Mongo、Git、JavaParser 或服務端模型。
 
 ## 入口與測試範圍
 
 參閱 [Testing and verification](testing.md#verification-commands) 取得完整命令與先決條件。普通 reactor `mvn --batch-mode --no-transfer-progress test` 不需外部資料庫或 Docker；`SOURCE_TEST_RG=/absolute/path/to/rg scripts/test-source-mcp.sh` 使用真實 Git、ripgrep、SQLite、native MCP SDK、分離的 Indexer 與 warm/cold Query JVM。這兩個 native lanes 須在資源檢查與執行授權後串行、限額執行。另行授權 image gate 後才建立映像並執行 `QUERY_IMAGE=java-source-query:phase3 INDEXER_IMAGE=java-source-indexer:phase3 scripts/test-source-images.sh`。命令與已撰寫情境本身不是執行證據；native 成功不代表模型使用、遠端 TLS、私有 repo coverage、容器 mount/UID 或吞吐量已驗證。
 
-兩個 `/mcp` server 都透過 `X-Api-Token` 認證，但權限**分開**：Indexer 私有入口使用管理 token，提供 `prepare_source`、`prepare_semantic_index`、`get_job`；Query 只讀入口使用 read token，提供 `list_repositories`、`get_context`、`list_files`、`search_text`、`read_source`、`search_code`、`get_outline`、`list_entry_points`。HTTP 與 MCP 應對同一 facade 的成功及安全錯誤比對 JSON TextContent、structuredContent、HTTP body；不能只確認 schema、工具數或連線成功。客戶端以隔離設定注入 secret，不修改全域登入或儲存 populated secret。私有 Indexer ingress 與 Query ingress 的正式部署須有核准 TLS；localhost HTTP 無法證明此項。
+兩個 `/mcp` server 都透過 `X-Api-Token` 認證，但權限**分開**：Indexer 私有入口使用管理 token，提供 `prepare_source`、`prepare_semantic_index`、`get_job`；Query 只讀入口使用 read token，提供 `list_repositories`、`get_context`、`list_files`、`search_text`、`read_source`、`search_code`、`get_outline`、`list_entry_points`、`find_relations`。HTTP 與 MCP 應對同一 facade 的成功及安全錯誤比對 JSON TextContent、structuredContent、HTTP body；不能只確認 schema、工具數或連線成功。客戶端以隔離設定注入 secret，不修改全域登入或儲存 populated secret。私有 Indexer ingress 與 Query ingress 的正式部署須有核准 TLS；localhost HTTP 無法證明此項。
 
 Query MCP 客戶端須各自 initialize Streamable HTTP session，保存 server-issued
 `Mcp-Session-Id`，後續 request／notification 帶 session ID、協商的
@@ -14,6 +14,68 @@ Query MCP 客戶端須各自 initialize Streamable HTTP session，保存 server-
 clients 同時使用相同 JSON-RPC request ID 都能成功；取消只影響所屬 session，
 不影響另一 client，且 owner cancellation 後子程序被回收、後續搜尋仍可用。
 完整生命週期見 [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle)。
+
+## Agent-operated onboarding acceptance
+
+Use [onboard-repository](../../skills/onboard-repository/SKILL.md) for the operator,
+not the description-only skill or Query client. A fresh operator receives approved
+origin/ID, disposable paths, existing executable services/artifact inputs and an
+explicit authorization envelope—not prewritten registration/dependency settings.
+
+1. Preserve the source request UUID before submission; a no-revision refresh must
+   reach COMPLETE before deriving roots/dependencies from its exact SHA.
+2. Demonstrate dependency selection rather than guessing: the small external-JAR
+   fixture includes multiple approved cached versions and a descriptor selecting
+   one. Record chosen coordinates, order, byte digest and roots; no downloads,
+   target builds, wrapper execution or global cache/config changes.
+3. Load the chosen Relations inputs through authorized disposable Indexer
+   configuration/restart, prepare exact current using a separate saved UUID, and
+   obtain COMPLETE with profile/generation and source identity.
+4. Stop Indexer before the separate Query-only `gpt-6-luna` acceptance. The querying
+   agent receives no admin credentials or local source/oracle tools. Preserve full
+   invocation and MCP trace; validate outline, raw source, dependency descriptor,
+   resolved external target/signature/digest, exact citations and complete paging.
+5. Deliver the source-grounded description as DRAFT/NOT_VERIFIED, not a published
+   APPROVED hint. Distinguish operator configuration/preparation from model query
+   evidence and from production deployment acceptance.
+
+For source-only onboarding, index/outline are not applicable. Explicitly approved
+Relations without external dependencies uses representative source/JDK facts;
+that exception cannot satisfy the external-dependency fixture gate or hide missing
+required dependencies. Maven/Gradle effective-model resolution, private artifact
+downloads, unsupported JAR layouts and large projects require their own evidence.
+
+### Onboarding observed evidence — 2026-10-10
+
+The final accepted fresh Codex CLI 0.162.1 invocation explicitly requested
+`gpt-6-luna`; no provider-reported model identity was supplied or inferred.
+Only Query MCP was configured; local source/shell/browser and administration
+tools were disabled. Indexer had stopped before this client ran.
+
+- Repository: `onboarding-greeting`.
+- Exact SHA: `342bd62a748696bbe3d1dd0b6863dfebbcee9fbd`.
+- Generation: `9c677c28-a0f6-4dce-a863-d2ee8f035e8f`, profile 3/3.
+- Ten completed Query calls: one repository list, one exact context, three
+  directory listings, two raw reads, one outline and two CALL relation pages.
+- CALL pages preserve FILE/OUTGOING/CALL/limit=1 and exact pins; the actual cursor
+  reaches `hasMore=false`. Two distinct STATIC_RESOLVED rows are counted.
+- External target `org.apache.commons.lang3.StringUtils.isBlank(java.lang.CharSequence)`
+  cites `src/main/java/sample/Greeting.java:7`, with artifact
+  `commons-lang3-3.20.0` and SHA-256
+  `69e5c9fa35da7a51a5fd2099dfe56a2d8d32cf233e2f6d770e796146440263f4`.
+  The separate `java.lang.String.strip()` target has Java-platform provenance.
+- The answer cites the actual caller expression at Java lines 6–8 and the version
+  property/dependency at `pom.xml:4–5`; it does not infer external implementation
+  behavior or build success. Four plain repo@SHA:relative-path:line citations and
+  both raw payloads were checked against the owned exact Git source.
+
+Evidence is local in `.superpowers/sdd/2026-10-10-repo-onboarding/`: `operator/`,
+`operator-verification.json`, and accepted `luna-citations/`. Prior `luna/` and
+`luna-grounded/` answers remain NOT_ACCEPTED for unsupported API semantics and
+fabricated client-local citations respectively. CLI exit zero alone was insufficient.
+The independent reviewer inspected the final trace/answer and returned READY;
+root retains acceptance and checked Git-byte/hash evidence. Limits and runtime
+scope are in [testing](testing.md#repository-onboarding-local-evidence--2026-10-10).
 
 ## Source journey 驗收
 
@@ -115,6 +177,76 @@ use, private production coverage, TLS or capacity.
 5. 核對 repo/SHA/path/blobId/contentDigest 與 raw UTF-8 `[startByte,endByte)`；公開行號只計 LF。Unicode escape 的 raw spelling 可與解碼後名稱不同，不能直接假定二者字串相同。`coverage.complete=false` 與分頁 `hasMore` 是兩個維度；空結果不證明整個 repo 不存在該功能或宣告。
 6. 用實際 SQLite 與 HTTP/MCP 檢查完整 row 的 byte-limited continuation、第一列／metadata 過大時的 `INDEX_RESULT_TOO_LARGE`／HTTP 413，以及 160 KiB application、512 KiB transport 上限。使用真正執行中的 SQL 證明 deadline／取消、connection 關閉與借用 source guard 的生命週期，不能以預先過期 budget 或 immutable reader 的一般 SQLite lock 取代。
 7. 用 disposable roots 與可控時鐘檢查讀取保護、selected generation 保護、source／companion 每個 durable handoff、停用 retention、原 intent 完成前的同 SHA 再發布 fence，以及 path/digest 替換拒絕。Query 只掛 source/index 兩個唯讀子目錄；JNI extraction 在程序私有目錄，不取得 Indexer 私有 Git/jobs/staging。
+
+## Phase 4 Relations 接受條件
+
+下列是 acceptance contract，不是已執行結果。實際結果另記於 [testing](testing.md)。
+
+1. 以顯式核准的 source roots／local JAR SHA-256／Java 21 identity 建 profile 3，
+   default-disabled syntax build 保持 profile 2。實際 child JVM 建立 SQLite，
+   parent 唯一發布；來源 readiness 不等於 relation coverage 完整。
+2. 真實 Git A 當 current 時建 A，refresh 到 B 再建 B。Query 兩個 exact
+   contexts／generations 同時可讀；A 的 continuation 跨 B 發布後仍是 A。
+   同 SHA rebuild 的舊 pin 只在尚保留時有效；受保護的正常 collection 後明確
+   `INDEX_GENERATION_EXPIRED`，不能切 selected/current。停止 Indexer 後 cold Query
+   仍能讀 retained A/B；source 30 日保留不承諾 obsolete generation TTL。
+3. 核對 overload 的 canonical signature、interface 靜態 target、真實 platform/
+   approved artifact provenance，以及 missing type 無 target 的 safe reason。
+   每個 occurrence／endpoint raw bytes 與 Git blob 相符；lambda、initializer、
+   shadowed field、package qualifier 不製造錯誤 caller 或 missing-type 證據。
+4. HTTP/event/DB facts 永遠是 CANDIDATE，literal／dynamic／placeholder／unknown
+   overload 區分明確，不能 route/topic/table join。非 Java FILE 回明示
+   UNSUPPORTED；profile 1/2 回 capability unavailable，不偽裝空成功。
+5. 真實 SQLite／worker 檢查 publication integrity、whole-response byte budgets、
+   frozen-input replacement/restart、deadline／取消／parent EOF／actual reap、
+   capacity 或 limit refusal 保留既有 READY。Query held guard/permit 不早於實際
+   SQL cleanup 釋放。受測程序／資料均為 disposable，不操作既有服務。
+6. 外部 Query-only 模型客戶端**明確選擇 `gpt-6-luna`**。只提供 read endpoint/
+   token，不提供 Indexer 或 local-source/oracle tools；要求解釋 A/B 靜態 call
+   差異、interface／unresolved 限制，至少一次 continuation 與 exact-context
+   raw-source 補讀。保留 client/version、model、invocation、完整 MCP tool trace、
+   最終回答與 repo/SHA/path/line 引用。模型不可用時記錄 blocker，不靜默代換。
+7. Ordinary／native／模型接受測試、task review、whole-branch final review 與
+   image／CI／部署安全／容量 gates 分別報告；未跑的項目不由其他結果推定通過。
+
+## Phase 4 Luna 本機證據（2026-10-10）
+
+Codex CLI **0.162.1** 明確以 `--model gpt-6-luna` 執行；沒有額外
+provider-reported model identity，不由 requested model 推定。Indexer 在 agent
+開始前已停止；agent 僅有 Query read token／MCP，沒有本機 source、shell、
+web 或 preparation tools。未修改全域 client 設定或 credentials。
+
+| Context | Repository / full SHA | Pinned generation |
+| --- | --- | --- |
+| A | `relations-luna` / `0de20c09b394d53ce18c36c3481dba5bf02369eb` | `f82c0c95-2f7b-4ad0-a61a-d476e3568573` |
+| B | `relations-luna` / `27875ef1ed21e4e40d848c2f761c204db54e8fc3` | `1eb0ebf1-a3eb-413b-9c2c-2bd8f461f608` |
+
+實際 trace 有 **21 個 Query MCP calls、零 Query errors**：完整無過濾
+repository list、兩個 exact contexts、檔案導覽、10 次 `find_relations`、
+6 次 `read_source(view=raw)`。A 有重複的成功前兩頁，之後 A/B 各自四頁
+完整讀到 `hasMore=false`；每頁 `limit=1`，context/generation/anchor/
+direction/filters 均保持。重複成功讀取不是新增 CALL occurrence。
+
+外部 agent 的來源結論及 controller 對原 MCP payload／Git bytes 的核對：
+- A 的 `src/demo/Demo.java:7` 是 `save("x")`，靜態目標為
+  `demo.Demo.save(java.lang.String)`；B 同一行是 `save((Object) "x")`，
+  目標為 `demo.Demo.save(java.lang.Object)`。上述 A/B 表格是各引用的 exact SHA。
+- 兩版 `Demo.java:6` 的 `target.save(1)` 指向
+  `demo.Sink.save(java.lang.Object)`；兩版 `src/demo/Sink.java:2` 的 raw
+  interface 宣告均已讀取，沒有推定實際 receiver／runtime dispatch。
+- 兩版 `Demo.java:8` 的 JDK `List.of` 靜態解析成功；`:9` 的
+  `unknown.work()` 為 `UNRESOLVED/MISSING_TYPE`，沒有 target。
+- 每版實際 CALL rows 都是 3 resolved／1 unresolved；不用全 generation 的
+  `relationCoverage` 代替 filtered rows。六次 raw 回應均與保存的 exact Git bytes 相符。
+
+完整 invocation、prompt、JSONL MCP arguments/results、原始回答與核對紀錄
+保存在 ignored `.superpowers/sdd/2026-10-10-phase4-relations/luna-evidence-complete/`。
+前四輪未通過紀錄亦保留：路由不可用、參數錯誤後停止、錯誤敘述不符 trace、
+未讀完分頁。CLI exit 0 不作 acceptance；本輪通過也不保證未來模型回答正確。
+本輪使用 final-review 四項 production 修正前的快照；修正後 ordinary／native
+驗證已通過，但未重新執行 Luna。歷史 Query executable 的 hash 當時未保存；
+另存的 dependency-JAR hash 不代表該次 Query runtime，亦不以最終 native hash 取代。
+Image／CI、正式部署與多使用者容量仍未驗收。
 
 ## Phase 3 本機 native 證據（2026-10-09）
 

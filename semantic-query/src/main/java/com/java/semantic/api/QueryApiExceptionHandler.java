@@ -46,9 +46,9 @@ public final class QueryApiExceptionHandler {
         return switch (error.code()) {
             case "INVALID_ARGUMENT" -> HttpStatus.BAD_REQUEST;
             case "REPOSITORY_NOT_FOUND", "REVISION_NOT_PREPARED", "SOURCE_NOT_FOUND",
-                    "INDEX_GENERATION_EXPIRED" -> HttpStatus.NOT_FOUND;
+                    "INDEX_GENERATION_EXPIRED", "INDEX_SYMBOL_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "SOURCE_NOT_PREPARED", "SOURCE_SUMMARY_UNAVAILABLE", "INDEX_NOT_CURRENT",
-                    "INDEX_NOT_PREPARED", "INDEX_INCOMPATIBLE" -> HttpStatus.CONFLICT;
+                    "INDEX_NOT_PREPARED", "INDEX_INCOMPATIBLE", "INDEX_CAPABILITY_UNAVAILABLE" -> HttpStatus.CONFLICT;
             case "SOURCE_UNSUPPORTED" -> HttpStatus.UNPROCESSABLE_CONTENT;
             case "SOURCE_RESULT_TOO_LARGE", "INDEX_RESULT_TOO_LARGE" -> HttpStatus.CONTENT_TOO_LARGE;
             case "SOURCE_BUSY", "SOURCE_UNAVAILABLE", "INDEX_UNAVAILABLE", "INDEX_BUSY" -> HttpStatus.SERVICE_UNAVAILABLE;

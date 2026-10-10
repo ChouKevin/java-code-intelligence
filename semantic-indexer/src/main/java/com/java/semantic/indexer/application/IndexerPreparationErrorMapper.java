@@ -23,8 +23,8 @@ public final class IndexerPreparationErrorMapper {
         if (exception instanceof IndexFailure index) {
             Code code = index.code();
             int status = switch (code) {
-                case INDEX_NOT_PREPARED, INDEX_NOT_CURRENT, INDEX_INCOMPATIBLE -> 409;
-                case INDEX_GENERATION_EXPIRED -> 404;
+                case INDEX_NOT_PREPARED, INDEX_NOT_CURRENT, INDEX_INCOMPATIBLE, INDEX_CAPABILITY_UNAVAILABLE -> 409;
+                case INDEX_GENERATION_EXPIRED, INDEX_SYMBOL_NOT_FOUND -> 404;
                 case INDEX_RESULT_TOO_LARGE -> 413;
                 case INDEX_UNAVAILABLE, INDEX_BUSY -> 503;
                 case INDEX_TIMEOUT -> 504;

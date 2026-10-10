@@ -57,6 +57,10 @@ public final class SemanticQueryController {
     public Object entryPoints(@RequestBody Map<String, Object> input) {
         return facade.execute("list_entry_points", input);
     }
+    @PostMapping("/relations")
+    public Object findRelations(@RequestBody Map<String, Object> input) {
+        return facade.execute("find_relations", input);
+    }
     @PostMapping("/source")
     public Object readSource(@RequestBody Map<String, Object> input) {
         return facade.execute("read_source", input);

@@ -8,6 +8,7 @@ import com.java.semantic.indexer.index.IndexSourceAccess;
 import com.java.semantic.indexer.index.SemanticIndexJob;
 import com.java.semantic.indexer.index.SqliteIndexBuilder;
 import com.java.semantic.indexer.index.JavaSyntaxExtractor;
+import com.java.semantic.indexer.index.IndexAnalysisIntent;
 import com.java.semantic.indexer.job.IndexJobAlreadyActiveException;
 import com.java.semantic.indexer.job.IndexJobDispatcher;
 import com.java.semantic.indexer.job.IndexJobId;
@@ -129,7 +130,7 @@ class SourceSemanticLifecycleTest {
 
             IndexLifecycleFixture reopened = indexes(source, Clock.systemUTC());
             reopened.coordinator.validateStartup();
-            reopened.jobs.recover(reopened.publications);
+            reopened.jobs.recover(reopened.publications, reopened.inputs);
             assertThat(reopened.jobs.find(source.git.repository, indexRequest)).contains(accepted);
             SemanticIndexJob running = reopened.jobs.claimNext().orElseThrow();
             assertThat(running.phase()).isEqualTo(SemanticIndexJob.Phase.RUNNING);
@@ -139,7 +140,7 @@ class SourceSemanticLifecycleTest {
             residue.addAll(atomicWriteResidue(jobDirectory, source.mapper.writeValueAsBytes(running)));
             IndexLifecycleFixture restarted = indexes(source, Clock.systemUTC());
             restarted.coordinator.validateStartup();
-            restarted.jobs.recover(restarted.publications);
+            restarted.jobs.recover(restarted.publications, restarted.inputs);
             SemanticIndexJob interrupted = restarted.jobs.find(source.git.repository, indexRequest).orElseThrow();
             assertThat(interrupted.phase()).isEqualTo(SemanticIndexJob.Phase.FAILED);
             assertThat(interrupted.failureCode()).contains("WORKER_INTERRUPTED");
@@ -232,7 +233,7 @@ class SourceSemanticLifecycleTest {
             var indexes = indexes(source, Clock.systemUTC());
             var input = new IndexSourceAccess(source.publications, source.registry, source.properties)
                     .input(new SourceContext("orders", revision), UUID.randomUUID().toString());
-            indexes.jobs.admit(input, shared, Optional.empty());
+            indexes.jobs.admit(input, IndexJobId.create(), shared, Optional.empty(), IndexAnalysisIntent.syntax());
             assertThatThrownBy(indexes.coordinator::validateStartup).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> indexes.coordinator.getJob(source.git.repository, Optional.empty(), Optional.of(shared)))
                     .isInstanceOf(IllegalStateException.class);

@@ -46,7 +46,7 @@ class HttpMcpParityTest {
                 .mcpQueryToolSpecifications(facade, fixture.mapper);
         assertThat(SemanticMcpToolCatalog.tools()).extracting(SemanticMcpToolCatalog.ToolDefinition::name)
                 .containsExactly("list_repositories", "get_context", "list_files", "search_text", "read_source",
-                        "search_code", "get_outline", "list_entry_points");
+                        "search_code", "get_outline", "list_entry_points", "find_relations");
         Map<String, Object> context = Map.of("repositoryId", "sample", "revision", SourceFilesystemFixture.SHA);
         assertParity(http, tools, fixture.mapper, "list_repositories", "/api/v1/repositories", Map.of(), false, 200, null);
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context", Map.of("repositoryId", "sample"), false, 200, null);
@@ -61,6 +61,20 @@ class HttpMcpParityTest {
                 Map.of("context", context, "path", "src/Order.java"), true, 409, "INDEX_NOT_PREPARED");
         assertParity(http, tools, fixture.mapper, "list_entry_points", "/api/v1/entry-points",
                 Map.of("context", context), true, 409, "INDEX_NOT_PREPARED");
+        assertParity(http, tools, fixture.mapper, "find_relations", "/api/v1/relations",
+                Map.of("context", context, "indexGeneration", "00000000-0000-0000-0000-000000000001",
+                        "anchor", Map.of("kind", "FILE", "path", "src/Order.java"), "direction", "OUTGOING"),
+                true, 404, "INDEX_GENERATION_EXPIRED");
+        assertParity(http, tools, fixture.mapper, "find_relations", "/api/v1/relations",
+                Map.of("context", Map.of("repositoryId", "other", "revision", SourceFilesystemFixture.SHA),
+                        "indexGeneration", "00000000-0000-0000-0000-000000000001",
+                        "anchor", Map.of("kind", "SOURCE_SYMBOL", "symbolId", "0".repeat(64)), "direction", "INCOMING"),
+                true, 404, "REPOSITORY_NOT_FOUND");
+        assertParity(http, tools, fixture.mapper, "find_relations", "/api/v1/relations",
+                Map.of("context", Map.of("repositoryId", "sample", "revision", "f".repeat(40)),
+                        "indexGeneration", "00000000-0000-0000-0000-000000000001",
+                        "anchor", Map.of("kind", "SOURCE_SYMBOL", "symbolId", "0".repeat(64)), "direction", "INCOMING"),
+                true, 404, "REVISION_NOT_PREPARED");
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context",
                 Map.of("repositoryId", "other"), true, 404, "REPOSITORY_NOT_FOUND");
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context",
@@ -81,6 +95,38 @@ class HttpMcpParityTest {
                 Map.of("context", Map.of("repositoryId", "sample", "revision", "main"),
                         "query", "Order", "match", "exact"), true, 400, "INVALID_ARGUMENT");
         assertThat(facade.getContext(new ContextRequest("sample", Optional.empty())).context()).contains(fixture.context);
+    }
+
+    @Test
+    void transport_schemas_expose_capabilities_for_discovery_syntax_and_static_relations() throws Exception {
+        tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        JsonNode input = mapper.valueToTree(com.java.semantic.mcp.SemanticMcpSchemaCatalog.inputSchema("find_relations"));
+        assertThat(input.get("additionalProperties").asBoolean()).isFalse();
+        assertThat(input.get("required").toString()).contains("context", "indexGeneration", "anchor", "direction");
+        assertThat(input.get("properties").get("anchor").get("oneOf").size()).isEqualTo(3);
+        assertThat(input.get("allOf").size()).isEqualTo(2);
+        for (String operation : List.of("search_code", "get_outline", "list_entry_points", "find_relations")) {
+            JsonNode result = mapper.valueToTree(com.java.semantic.mcp.SemanticMcpSchemaCatalog.outputSchema(operation))
+                    .get("oneOf").get(0);
+            assertThat(result.get("required").toString()).contains("capabilities");
+            JsonNode capabilities = result.get("properties").get("capabilities");
+            assertThat(capabilities.get("additionalProperties").asBoolean()).isFalse();
+            assertThat(capabilities.get("required").toString()).contains("syntax", "folds", "relations");
+        }
+        JsonNode discovery = mapper.valueToTree(com.java.semantic.mcp.SemanticMcpSchemaCatalog.outputSchema("get_context"))
+                .get("oneOf").get(0).get("properties").get("index").get("anyOf").get(0);
+        assertThat(discovery.get("required").toString()).contains("capabilities");
+        assertThat(discovery.get("properties").get("capabilities").get("required").toString()).contains("syntax", "folds", "relations");
+        try (java.io.InputStream document = HttpMcpParityTest.class.getResourceAsStream("/openapi/semantic-api-v1.yaml")) {
+            JsonNode schemas = mapper.readTree(java.util.Objects.requireNonNull(document)).get("components").get("schemas");
+            assertThat(schemas.get("FindRelationsRequest").get("allOf").size()).isEqualTo(2);
+            for (String schema : List.of("IndexSummary", "IndexDeclarationResult", "IndexEntryPointResult", "RelationResult")) {
+                assertThat(schemas.get(schema).get("required").toString()).contains("capabilities");
+                assertThat(schemas.get(schema).get("properties").get("capabilities").get("$ref").asString())
+                        .isEqualTo("#/components/schemas/IndexCapabilities");
+            }
+            assertThat(schemas.get("IndexCapabilities").get("required").toString()).contains("syntax", "folds", "relations");
+        }
     }
 
 

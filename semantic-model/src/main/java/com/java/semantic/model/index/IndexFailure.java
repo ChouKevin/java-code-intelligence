@@ -10,6 +10,8 @@ public final class IndexFailure extends RuntimeException {
         INDEX_UNAVAILABLE("The index cannot be read. Use source reads or an available retained compatible generation. An operator may inspect the failure; rebuilding this exact revision is allowed only while it is the published current."),
         INDEX_INCOMPATIBLE("The index schema or parser profile is incompatible. Use source reads or a retained compatible generation. An authorized operator may rebuild this exact revision with matching Indexer and Query versions only while it is the published current."),
         INDEX_GENERATION_EXPIRED("The requested index generation is no longer published. Restart the query in the same source context, without reusing its cursor."),
+        INDEX_CAPABILITY_UNAVAILABLE("The exact index generation does not provide relations. Use its syntax capabilities or explicitly select an available relations-capable generation."),
+        INDEX_SYMBOL_NOT_FOUND("The anchor is not present in this exact index generation. Obtain an anchor from the same source context and generation."),
         INDEX_RESULT_TOO_LARGE("A complete result item or required metadata exceeds the response budget. Narrow the query or use read_source for a known path."),
         INDEX_BUSY("The shared search limit is in use. Retry this same read-only context according to client policy."),
         INDEX_TIMEOUT("The index operation exceeded its deadline. Source context and generation were not silently changed.");

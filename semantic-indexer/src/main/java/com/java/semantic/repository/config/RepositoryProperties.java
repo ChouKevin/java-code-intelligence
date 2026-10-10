@@ -80,6 +80,9 @@ public class RepositoryProperties {
         private String defaultBranch = "main";
         private String projectGuidePath = "";
         private NavigationHintConfig navigationHint;
+        private RelationsConfig relations = new RelationsConfig();
+        public RelationsConfig getRelations() { return relations; }
+        public void setRelations(RelationsConfig relations) { this.relations = Objects.requireNonNull(relations); }
 
         public String getDisplayName() { return displayName; }
         public void setDisplayName(String name) { displayName = Objects.requireNonNull(name); }
@@ -91,6 +94,30 @@ public class RepositoryProperties {
         public void setProjectGuidePath(String path) { projectGuidePath = Objects.requireNonNull(path); }
         public NavigationHintConfig getNavigationHint() { return navigationHint; }
         public void setNavigationHint(NavigationHintConfig hint) { navigationHint = hint; }
+    }
+
+    /** Operator-approved local inputs, never accepted from a preparation request. */
+    public static final class RelationsConfig {
+        private boolean enabled;
+        private List<String> sourceRoots = List.of();
+        private List<DependencyConfig> dependencies = List.of();
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public List<String> getSourceRoots() { return sourceRoots; }
+        public void setSourceRoots(List<String> roots) { sourceRoots = List.copyOf(roots); }
+        public List<DependencyConfig> getDependencies() { return dependencies; }
+        public void setDependencies(List<DependencyConfig> dependencies) { this.dependencies = List.copyOf(dependencies); }
+    }
+    public static final class DependencyConfig {
+        private String id = "";
+        private String path = "";
+        private String sha256 = "";
+        public String getId() { return id; }
+        public void setId(String id) { this.id = Objects.requireNonNull(id); }
+        public String getPath() { return path; }
+        public void setPath(String path) { this.path = Objects.requireNonNull(path); }
+        public String getSha256() { return sha256; }
+        public void setSha256(String digest) { sha256 = Objects.requireNonNull(digest); }
     }
 
     /** Nullable on RepositoryConfig so omitted settings remain distinct from an unreviewed hint. */

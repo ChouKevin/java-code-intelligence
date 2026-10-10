@@ -2,6 +2,7 @@ package com.java.semantic.indexer.index;
 
 import com.java.semantic.indexer.job.FileSourceJobStore;
 import com.java.semantic.indexer.job.PreparationRequestId;
+import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.indexer.source.*;
 import com.java.semantic.model.index.IndexContract;
@@ -31,6 +32,7 @@ final class IndexArtifactFixture implements AutoCloseable {
     final RepositorySourceManager manager;
     final IndexPublicationStore indexes;
     final FileSemanticIndexJobStore jobs;
+    final ResolutionInputStore inputs;
 
     IndexArtifactFixture(Path root) throws Exception {
         git = new LocalSourceFixture(root);
@@ -47,6 +49,7 @@ final class IndexArtifactFixture implements AutoCloseable {
         manager = new RepositorySourceManager(sourceJobs, resolver, new JGitRevisionExporter(resolver, registry, mapper), sources, registry, properties);
         indexes = new IndexPublicationStore(properties, mapper, owner, sources, registry);
         jobs = new FileSemanticIndexJobStore(properties, mapper, owner);
+        inputs = new ResolutionInputStore(properties, mapper, new PlatformIdentity(), registry);
     }
 
     IndexBuildInput prepare(String text) throws Exception {
@@ -61,6 +64,12 @@ final class IndexArtifactFixture implements AutoCloseable {
         Path revision = git.published.resolve("orders/revisions").resolve(context.revision());
         return new IndexBuildInput(context, registry.origin(git.repository), UUID.randomUUID().toString(), receipt.manifestDigest(),
                 sources.manifest(context, receipt.manifestDigest()), revision.resolve("tree"), revision.resolve("inventory.jsonl"));
+    }
+    SemanticIndexJob admit(IndexBuildInput input, PreparationRequestId request, Optional<String> expected) {
+        IndexJobId id = IndexJobId.create();
+        IndexAnalysisIntent analysis = inputs.freeze(input, id, request,
+                properties.getRepositories().get("orders").getRelations(), () -> { });
+        return jobs.admit(input, id, request, expected, analysis);
     }
     Path stage(IndexBuildInput input) { return git.admin.resolve("index/staging").resolve(input.generation()); }
     Path generation(IndexBuildInput input) {

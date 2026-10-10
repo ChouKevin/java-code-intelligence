@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Operates exclusively on a fresh temporary directory and disposable containers.
-indexer_image="${INDEXER_IMAGE:-java-source-indexer:phase3}"
-query_image="${QUERY_IMAGE:-java-source-query:phase3}"
+indexer_image="${INDEXER_IMAGE:-java-source-indexer:phase4}"
+query_image="${QUERY_IMAGE:-java-source-query:phase4}"
 for program in docker git curl jq jar javac; do
   command -v "${program}" >/dev/null || { echo "missing prerequisite: ${program}" >&2; exit 1; }
 done
@@ -42,7 +42,7 @@ mkdir -p "${root}/fixture" "${root}/storage/source-published" "${root}/storage/i
 git -C "${root}/fixture" init -q -b main
 git -C "${root}/fixture" config user.name 'Source Smoke'
 git -C "${root}/fixture" config user.email 'source-smoke@example.invalid'
-printf 'package smoke;\nclass Example { String marker = "source-image-needle"; public static void main(String[] args) {} }\n' > "${root}/fixture/Example.java"
+printf 'package smoke;\nclass Example { String marker = "source-image-needle"; public static void main(String[] args) { String.valueOf(1); } }\n' > "${root}/fixture/Example.java"
 git -C "${root}/fixture" add Example.java
 git -C "${root}/fixture" commit -qm 'published source fixture'
 revision="$(git -C "${root}/fixture" rev-parse HEAD)"
@@ -79,6 +79,8 @@ for module in semantic-indexer semantic-query; do
 done
 grep -Eq 'BOOT-INF/lib/javaparser-core-3\.28\.2\.jar$' "${root}/semantic-indexer.entries" \
   || fail 'Indexer lacks the approved JavaParser runtime'
+grep -Eq 'BOOT-INF/lib/javaparser-symbol-solver-core-3\.28\.2\.jar$' "${root}/semantic-indexer.entries" \
+  || fail 'Indexer lacks the approved Symbol Solver runtime'
 if grep -Eq 'BOOT-INF/lib/[^/]*javaparser' "${root}/semantic-query.entries"; then
   fail 'Query contains a parser runtime'
 fi
@@ -99,7 +101,7 @@ indexer_container="$(docker run -d -p 127.0.0.1::8080 \
   --mount "type=bind,src=${root}/fixture,dst=/fixture,readonly" \
   -e SEMANTIC_INDEXER_ADMIN_TOKEN=indexer-smoke-only \
   -e SEMANTIC_SOURCE_RETENTION_INTERVAL=1s \
-  -e 'SPRING_APPLICATION_JSON={"semantic":{"repositories":{"fixture":{"url":"file:///fixture","default-branch":"main","display-name":"Smoke Fixture"}}}}' \
+  -e 'SPRING_APPLICATION_JSON={"semantic":{"repositories":{"fixture":{"url":"file:///fixture","default-branch":"main","display-name":"Smoke Fixture","relations":{"enabled":true,"source-roots":[""],"dependencies":[]}}}}}' \
   "${indexer_image}")"
 indexer_url="http://$(docker port "${indexer_container}" 8080/tcp)"
 wait_http() {
@@ -264,6 +266,8 @@ prepare_index() {
      and .publication.manifest.context.revision == $sha
      and .publication.manifest.indexGeneration == .indexGeneration
      and .publication.requestId == $request and .publication.jobId == .jobId
+     and .publication.manifest.profile.schemaVersion == 3 and .publication.manifest.profile.policyVersion == 3
+     and (.publication.manifest.analysisPlanDigest | test("^[0-9a-f]{64}$"))
      and (.publication.manifestDigest | length) == 64' "${root}/index-job.json" >/dev/null \
     || fail 'semantic job receipt identity mismatch'
   built_generation="$(jq -r '.indexGeneration' "${root}/index-job.json")"
@@ -295,8 +299,8 @@ initialize_query_mcp
 mcp_request "${query_url}" query-smoke-only "${query_session}" \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 jq -e '[.result.tools[].name] | sort ==
-  (["list_repositories","get_context","list_files","search_text","read_source","search_code","get_outline","list_entry_points"] | sort)' \
-  "${root}/mcp.json" >/dev/null || fail 'Query does not advertise exactly eight tools'
+  (["list_repositories","get_context","list_files","search_text","read_source","search_code","get_outline","list_entry_points","find_relations"] | sort)' \
+  "${root}/mcp.json" >/dev/null || fail 'Query does not advertise exactly nine tools'
 mcp_request "${indexer_url}" indexer-smoke-only '' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"image-smoke","version":"3"}}}'
 mcp_request "${indexer_url}" indexer-smoke-only '' \
@@ -323,6 +327,19 @@ jq -e '[.result.structuredContent.segments[] | select(.kind == "SOURCE") | .cont
   "${root}/mcp.json" >/dev/null || fail 'missing index broke source evidence'
 prepare_index "${revision}" a
 generation_a="${built_generation}"
+relation_input="{\"context\":${context_a},\"indexGeneration\":\"${generation_a}\",\"anchor\":{\"kind\":\"FILE\",\"path\":\"Example.java\"},\"direction\":\"OUTGOING\",\"relationKinds\":[\"CALL\"]}"
+post_query relations "${relation_input}"
+jq -e --arg gen "${generation_a}" \
+  '.indexGeneration == $gen and .analysisLevel == "STATIC" and .capabilities.relations == true
+   and .file.status == "ANALYZED" and (.items | length) == 1
+   and .items[0].resolutionState == "STATIC_RESOLVED"
+   and .items[0].target.external.signature == "java.lang.String.valueOf(int)"
+   and .items[0].target.external.module == "java.base"' "${root}/query.json" >/dev/null \
+  || fail 'packaged worker Relations did not resolve the written platform call'
+cp "${root}/query.json" "${root}/http-relations.json"
+call_query_mcp find_relations "${relation_input}"
+capture_mcp_payload "${root}/mcp-relations.json"
+assert_http_mcp_parity 'find_relations' "${root}/http-relations.json" "${root}/mcp-relations.json"
 post_query search-code "{\"context\":${context_a},\"query\":\"Example\",\"match\":\"exact\"}"
 jq -e --arg sha "${revision}" --arg gen "${generation_a}" \
   '.context.revision == $sha and .indexGeneration == $gen and .analysisLevel == "SYNTAX"
@@ -394,7 +411,7 @@ if docker exec -e SEMANTIC_QUERY_RG_EXECUTABLE=/missing-nondefault-rg "${query_c
     java -jar /app/semantic-query.jar --server.port=0 >"${root}/invalid-rg.log" 2>&1; then
   fail 'Query ignored the configured nondefault ripgrep executable'
 fi
-docker exec "${indexer_container}" sh -ceu 'test "$(id -u)" = 10001; test -d /data/source-admin; test -d /data/source-published; test -d /data/index-published; test -w /tmp/sqlite-native; test "$(stat -c %a /tmp/sqlite-native)" = 700'
+docker exec "${indexer_container}" sh -ceu 'test "$(id -u)" = 10001; test -d /data/source-admin; test -d /data/source-published; test -d /data/index-published; test -w /tmp; test -x /tmp'
 # This peer proves OS/UID/read-only-mount locking, not an in-flight HTTP request.
 # Native facade tests separately exercise full-operation lease ownership.
 printf 'package smoke;\nclass Example { String marker = "source-image-needle-B"; public static void main(String[] args) {} }\n' > "${root}/fixture/Example.java"
@@ -588,4 +605,4 @@ curl -sS --max-time 10 -X DELETE -o /dev/null \
   -H 'X-Api-Token: query-smoke-only' -H "Mcp-Session-Id: ${query_session}" \
   -H 'MCP-Protocol-Version: 2025-06-18' "${query_url}/mcp"
 successful=1
-echo 'Source/index images: real Git A/B refresh, current-only SQLite rebuild/read and segmented raw-byte citation, eight/three MCP tools, retained historical generations, source-independent native failure, read-only UID locking, GC and isolation passed'
+echo 'Source/index images: real Git A/B refresh, current-only child-built profile-3 SQLite and static Relations HTTP/MCP parity, segmented raw-byte citation, nine/three MCP tools, retained historical generations, source-independent native failure, read-only UID locking, GC and isolation passed'

@@ -46,6 +46,10 @@ must be separate and absolute; do not put index inside source/private storage.
 An absent default index root is normal source-only operation, not a reason to
 mount private Indexer storage into Query.
 
+For an agent-operated end-to-end flow, load
+[onboard-repository](../../skills/onboard-repository/SKILL.md); its explicit
+authorization and dependency-preparation steps do not grant service mutation.
+
 For onboarding, use separate external configuration files (paths are examples,
 not loaded automatically). A synthetic registration on Indexer:
 
@@ -156,18 +160,21 @@ For business discovery, list repositories without `nameFilter` and follow every 
 
 ### SQLite JNI prerequisites
 
-The Temurin runtime images provide `/tmp/sqlite-native`, owned by the process UID
-and mode `0700`, with `JAVA_TOOL_OPTIONS=-Dorg.sqlite.tmpdir=/tmp/sqlite-native`.
-SQLite's bundled Linux JNI library needs a matching CPU/libc runtime and a
-directory writable/traversable by that UID where native loading is permitted
-(not a `noexec` mount or a policy denying shared-library mapping). Preserve this
-system property if replacing `JAVA_TOOL_OPTIONS`. For read-only container roots,
-provide a **separate per-container** writable/executable tmpfs at that path with
-UID:GID `10001:10001` for Indexer or `10002:10002` for Query and mode `0700`.
-Native extraction never uses source/index publication or a shared temp volume.
-For unpackaged Java processes set the same JVM property to an owned private temp
-directory. Query opens sealed databases immutable/read-only, creates no database
-or journal/WAL/SHM sidecars, and does not need write permission on index mounts.
+Query's Temurin image provides `/tmp/sqlite-native`, owned by UID:GID
+`10002:10002`, mode `0700`, with
+`JAVA_TOOL_OPTIONS=-Dorg.sqlite.tmpdir=/tmp/sqlite-native`. Preserve that property
+when replacing Query's options; unpackaged Query needs the same owned private path.
+Indexer does not initialize SQLite in its parent process. Every syntax/Relations
+build child receives a fresh mode-`0700` temp directory under the parent's
+`java.io.tmpdir` (default `/tmp`), passed explicitly as the child's Java/SQLite
+temp path. Parent SQLite properties and `JAVA_TOOL_OPTIONS` are not forwarded.
+SQLite's bundled JNI library requires matching CPU/libc and writable/traversable
+storage where native mapping is permitted, not a `noexec` mount. For read-only
+container roots, provide separate writable/executable tmpfs storage: Indexer
+`/tmp` owned by `10001:10001`; Query `/tmp/sqlite-native` by `10002:10002`, with
+mode `0700`. Never share it or use source/index publication for extraction.
+Query opens sealed databases immutable/read-only, creates no database or
+journal/WAL/SHM sidecars, and needs no write permission on index mounts.
 Native bootstrap is lazy and index-local: source startup/tools and subsequent
 source preparation must remain usable if native loading fails.
 
@@ -179,11 +186,13 @@ are sealed immutable artifacts. The manifest binds repository/origin/SHA,
 source-manifest and inventory digests, canonical UUID generation, exact parser
 profile, coverage, database size/digest and preparation time. State membership
 and a full receipt (`manifest`, `manifestDigest`, `jobId`, `requestId`) authorize
-selection/recovery; a leftover directory alone never does. Private format-1
-semantic jobs live in `source-admin/index/jobs/<id>/<requestId>.json`, stage in
-`source-admin/index/staging/<generation>` and cleanup intents in
-`source-admin/index/retention/`. New index format/schema/policy are 1; existing
-source public format 1/policy 2 and private source-job format 2 are unchanged.
+selection/recovery; a leftover directory alone never does. New private format-2
+semantic jobs live in `source-admin/index/jobs/<id>/<requestId>.json`, with frozen
+analysis intent; legacy format-1 jobs remain recoverable. Stage in
+`source-admin/index/staging/<generation>` and keep cleanup intents in
+`source-admin/index/retention/`. Index manifest/state format remains 1; schema/policy
+profiles are separately versioned. Source public format 1/policy 2 and private
+source-job format 2 are unchanged.
 
 ## Repository origin and storage identity
 
@@ -329,10 +338,12 @@ explicitly prepare the same exact SHA if the approved remote still supplies it.
 Index operations keep the **same source repository shared guard** through digest,
 SQL materialization and actual connection/worker cleanup, plus the shared search
 permit. Source GC cannot reclaim the source or companion indexes mid-read.
-Selected generation for readable source is protected. Obsolete generations are
-collected only after their recorded expiry under the repository exclusive guard,
-with identity/digest-bound intents and membership recheck; cursors do not lease
-storage between calls. No new independent GC worker or operator-delete API exists.
+Selected generations for readable source are protected. Obsolete, non-selected
+generations have **no minimum retention TTL**: the idle collector may withdraw
+them on its next eligible scan under the repository exclusive guard, using
+identity/digest-bound intents and a membership recheck. The source revision's
+30-day guarantee does not extend to superseded index generations. Cursors do not
+lease storage between calls. No independent GC worker or operator-delete API exists.
 Source deletion creates a companion index intent **before** source withdrawal.
 The original source intent remains until source and index withdrawal/physical
 cleanup are durably complete, fencing same-SHA republication throughout.
@@ -475,7 +486,7 @@ GET /index/repositories/video/jobs?requestId=dcc061e8-d89f-46e0-ae76-d336c351d73
 
 That first `prepare_source` example deliberately omits `revision`: it is the explicit default-branch refresh step. Optional `revision` is instead an exact full lowercase 40-character commit already obtainable in the approved repository, never a branch/tag/path/ref. An explicit SHA publishes membership only and cannot update current. No URL, checkout path or arbitrary branch comes from the caller. HTTP `202` means durable acceptance; `ACCEPTED` may not yet have a resolved SHA. Capture `resolvedRevision` and `jobId`; use `get_job` with exactly one `jobId` or original `requestId`, scoped to the same repository, and wait for `COMPLETE`. The source job UUID is not reused for semantic preparation; the current-source migration section gives the two-step baseline/index recipe. The disposable example UUID is not a production identity. An original request reused, even with the same payload, is not a second submission (`REQUEST_ID_REUSED`); an active repo job is rejected separately. If the POST times out or its result is lost, retain and look up the original requestId. A missing lookup leaves acceptance unknown: continue original lookup or stop, never automatically resubmit. After inspecting an explicit terminal failure, a newly authorized attempt gets a new UUID. One Indexer process, one dispatcher lane, at most one active job per repository; do not run a second writer.
 
-Read-token users connect to Query `/mcp` or eight HTTP endpoints; all require `X-Api-Token: <read-secret>`:
+Read-token users connect to Query `/mcp` or nine HTTP endpoints; all require `X-Api-Token: <read-secret>`:
 
 ```http
 GET /api/v1/repositories
@@ -583,18 +594,20 @@ lines are one-based LF lines, preserving CRLF, tabs and raw Unicode escapes.
 Use `read_source` at that identical SHA to confirm and cite evidence. Never treat
 a written signature/owner as a resolved JVM descriptor/type or business fact.
 
-Newly built index generations use the JavaParser `3.28.2`, `JAVA_21`, Unicode
-escapes-enabled, tab-size-1 profile with `schemaVersion: 2` and `policyVersion: 2`.
-The reader and committed-receipt recovery accept only the known matching 1/1 and
-2/2 profiles. Existing profile 1/1 generations remain available to syntax Query
-operations but have no fold metadata; new builds persist the separate method and
-constructor fold projection. The service performs one [JLS 3.3 translation](https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.3) with
+Syntax-only builds use JavaParser `3.28.2`, `JAVA_21`, Unicode escapes-enabled,
+tab-size-1 schema/policy `2/2`; explicitly enabled Relations builds use the
+`JavaParserSymbolSolver` `3/3` profile. Readers and committed-receipt recovery
+support matching known profiles `1/1`, `2/2` and `3/3`. Profile 1 has syntax only,
+profile 2 adds folds, and profile 3 adds Relations. Discovery/results disclose
+these capabilities; sealed old generations are never upgraded in place.
+The service performs one [JLS 3.3 translation](https://docs.oracle.com/javase/specs/jls/se21/html/jls-3.html#jls-3.3) with
 exact raw-boundary mapping, including backslash eligibility and repeated `u`
 markers; JavaParser's duplicate Unicode preprocessing is disabled. Signatures
 exclude comments. Only written Java declarations are indexed; no
-generated record accessors/default constructors, Lombok members, symbol solver,
-classpath resolution, inheritance/call graph or repository builds. Entry kinds
-are MAIN, HTTP_MAPPING, SCHEDULED and RABBIT_LISTENER. MAIN_SIGNATURE is syntax;
+generated record accessors/default constructors, Lombok members or repository
+builds. Static resolution requires explicit Relations configuration below and
+never claims runtime dispatch. Syntax entry kinds are MAIN, HTTP_MAPPING, SCHEDULED
+and RABBIT_LISTENER. MAIN_SIGNATURE is syntax;
 FULLY_QUALIFIED/DIRECT_IMPORT/AMBIGUOUS_SIMPLE describe spelling/import evidence.
 Literal annotation values are retained, expressions remain unresolved. Type and
 method mappings are separate candidates, never synthesized runtime routes.
@@ -619,7 +632,7 @@ Pages default to 20, maximum 100. Common result UTF-8 JSON is at most 163,840 by
 HTTP body/MCP CallToolResult JSON at most 524,288 bytes (excluding protocol
 envelope/framing). Emit complete rows only: a byte-limited page continues after
 its last emitted row; first-row/metadata overflow gives INDEX_RESULT_TOO_LARGE,
-never silently skips an oversized row. `search_text` and these three tools share
+never silently skips an oversized row. `search_text` and all four index tools share
 at most two permits. Five-second index deadlines include source/index admission,
 digest, SQL and materialization; permits/guards outlive actual cleanup.
 Parent provenance validation uses an internal projection without the parent's
@@ -644,6 +657,8 @@ compatible selected generation.
 | INDEX_UNAVAILABLE | 503 | Diagnose safe private logs, JNI/temp permissions and artifact integrity; recover the original job first. A new rebuild requires that exact SHA to be current. |
 | INDEX_INCOMPATIBLE | 409 | Deploy matching writer/reader profile; rebuild only the exact current SHA. Historical readers use source tools or a retained compatible generation; an authorized explicit default-branch refresh must precede any historical rebuild. Never decode another schema as this one. |
 | INDEX_GENERATION_EXPIRED | 404 | Restart navigation explicitly on a retained compatible generation; no transparent cursor switch. |
+| INDEX_CAPABILITY_UNAVAILABLE | 409 | This known generation has no Relations capability. Keep exact pins and use source/syntax navigation, or explicitly select a retained capable generation. |
+| INDEX_SYMBOL_NOT_FOUND | 404 | The requested source/external identity is absent from this exact generation. Rediscover identities within the same context and generation. |
 | INDEX_RESULT_TOO_LARGE | 413 | Narrow operation/path/filters; a smaller page cannot split one oversized row. |
 | INDEX_BUSY | 503 | Shared bounded admission is full; retry the read explicitly, never prepare as fallback. |
 | INDEX_TIMEOUT | 504 | Narrow read scope and inspect owned runtime resources; no empty-success result. |
@@ -654,6 +669,169 @@ before index lookup. Missing/corrupt/incompatible/native-failing index must not
 invalidate the five source tools or rewrite any source publication.
 
 Query errors are safe and transport-equivalent: `INVALID_ARGUMENT` (400), `REPOSITORY_NOT_FOUND` (404, including invisible repos), `REVISION_NOT_PREPARED` (404), `SOURCE_NOT_FOUND` (404), `SOURCE_NOT_PREPARED` (409), `SOURCE_SUMMARY_UNAVAILABLE` (409 with a bounded `reason`), `SOURCE_UNSUPPORTED` (422), `SOURCE_BUSY` (503), `SOURCE_UNAVAILABLE` (503), `SOURCE_TIMEOUT` (504). MCP returns the corresponding code/message with `isError=true` and the same bounded reason where present; internal paths, credentials and raw process errors must not enter client output. `INDEX_NOT_CURRENT` (409) is an Indexer preparation error, not a Query-read denial.
+
+## Static Relations
+
+Relations is opt-in on **Indexer only**. Source preparation and Query never resolve
+dependencies. Configure approved inputs in private external configuration before
+submitting a new `prepare_semantic_index` for the exact published current SHA:
+
+```yaml
+semantic:
+  repositories:
+    sample:
+      relations:
+        enabled: true
+        source-roots: [src/main/java]
+        dependencies: []
+```
+
+Use 1–32 existing, canonical repository-relative, non-overlapping source roots;
+`""` selects the repository root. Empty dependencies are valid but may leave
+external types unresolved. Each optional dependency has a safe `id`, an absolute
+local regular-file `path`, and its exact lowercase `sha256`. Supply at most 128,
+in approved precedence order, with no symlinks, nested/fat JAR layouts, or implicit
+application classpath. Indexer does not run Maven/Gradle, target code, annotation
+processors, Git hooks, filters or dependency downloads. Ordinary multi-release
+JARs require their manifest declaration; select the highest supported version at
+or below Java 21. Limits are 64 MiB per JAR, 256 MiB total, 200,000 selected classes,
+1 MiB per class and 512 MiB selected expanded bytes. Unsupported input refuses the
+new job rather than silently choosing a different provider.
+
+Before durable acceptance, Indexer copies approved JARs into owned
+`source-admin/index/inputs/<jobId>/`, seals the source/profile/root/dependency/JDK
+analysis plan, and binds the descriptor to origin/repository/job/request/generation.
+Resolution precedence is Java 21 platform, admitted source catalogue, then ordered
+approved JAR metadata. The Java runtime `release` and `lib/modules` digests are
+part of the frozen platform identity. Changing deployment inputs cannot retarget
+an accepted job. Query receives public digests/provenance, never these private paths.
+Approved JAR IDs are operator labels, not reserved platform names. External target
+provenance distinguishes Java-platform declarations by their module and platform
+digest; a module-less JAR labeled `java21` still uses its approved artifact digest.
+Input-freeze refusals, including its preacceptance capacity checkpoints, are not
+accepted jobs. Capacity failures after durable acceptance remain terminal job
+failures; both boundaries preserve the existing READY publication. If a submission
+response is lost, inspect the original request ID rather than automatically retry.
+
+Profile 3 manifests retain `analysisPlanDigest`; profiles 1/2 omit it. Legacy
+format-1 accepted jobs keep syntax profile 2 even if configuration now enables
+Relations. Committed receipts recover before consulting current configuration,
+JDK identity or cleaned snapshots. Uncommitted accepted jobs with changed Java
+identity fail `ENVIRONMENT_CHANGED`; corrupt/missing owned inputs fail closed.
+Unknown-owner inputs are not deleted/adopted. Startup allows five seconds for an
+owned worker lease to settle, otherwise fails closed; interrupted RUNNING without
+a committed receipt becomes `WORKER_INTERRUPTED`, never an automatic replay.
+
+The parent remains sole publisher. A separate trusted service JVM owns the build:
+512 MiB heap, one active processor, 300-second deadline, and 64 KiB each for stdout
+and stderr. Its stable private worker lease is acquired before READY; GO authorizes
+build/source consumption. The child owns its lease/source guard until process exit;
+the parent retains its own source guard through termination and actual reaping.
+Parent stdin EOF terminates the child, including while waiting for GO or a source
+guard. SQLite JNI extraction remains process-private. Capacity, output overflow,
+deadline, cancellation or worker failure preserves the previous READY publication.
+Do not replace lock inodes or remove snapshots while their owned worker can live.
+
+Before creating or launching a worker's native-temp allocation, Indexer durably
+records `inputs/<jobId>/worker-temp.json` with validated job ownership, the parent
+temporary root and a UUID allocation ID. The private `index-worker-<jobId>-<allocationId>`
+directory stays on that executable temporary filesystem, not a published mount;
+its `owner.json` must match before the child accepts its JVM temp properties.
+Parent cleanup follows actual reap; restart cleanup waits for the owned worker
+lease and validates the exact allocation. It never sweeps a name prefix.
+
+Input cleanup first persists `source-admin/index/input-cleanup/<jobId>.json`
+outside the disappearing input leaf. This authority survives descriptor/lock
+removal and is consumed only after the owned native allocation and input leaf are
+gone. Recovery validates origin/job/context/path identity and preserves unknown
+leaves, mismatched markers and nonregular entries rather than adopting them.
+
+The 512 MiB limit is the child Java heap, not total deployment memory: budget
+Indexer/Query heaps, native mappings and filesystem cache separately. Frozen JAR
+copies, normalization scratch, source trees, staging and retained generations also
+coexist; the 64 MiB per-generation database cap is not a total storage quota.
+
+To stop new Relations builds, disable the repository's Relations setting; new
+syntax-only jobs use profile 2, while already accepted jobs retain their frozen
+intent and existing profile-3 generations remain unchanged. This does not downgrade
+private semantic job format 2. Keep compatible readers/writers for those records;
+never point an older Indexer at them or rewrite manifests/jobs to mimic older
+formats. A source-only rollback must leave semantic job/index storage untouched.
+
+MCP `find_relations` and `POST /api/v1/relations` require exact `context`,
+canonical UUID `indexGeneration`, a tagged `anchor`, and `direction` on every page:
+
+| Anchor | Fields | Directions |
+| --- | --- | --- |
+| `SOURCE_SYMBOL` | `symbolId` from this generation | `INCOMING`, `OUTGOING` |
+| `EXTERNAL_TARGET` | `targetId` from this generation | `INCOMING` |
+| `FILE` | canonical source `path` | `OUTGOING` |
+
+All relation enums are case-sensitive uppercase; `direction` is `INCOMING` or
+`OUTGOING`, never lowercase. Optional `relationKinds` and `resolutionStates` are
+enum lists: omitted/empty means all, duplicates normalize, explicit null is invalid.
+The filter field is `relationKinds`; do not reuse `search_code`'s `kinds` field.
+`directory` filters occurrence paths, not targets. `limit` defaults to 20, maximum
+100. Unknown fields and anchor/direction mismatches fail `INVALID_ARGUMENT`.
+Correct malformed arguments against the schema while retaining exact context and
+generation; do not blindly repeat an unchanged failure, remove pins or prepare a
+replacement. Example only; replace every identity with values from the same context:
+
+```json
+{"context":{"repositoryId":"sample","revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"indexGeneration":"00000000-0000-0000-0000-000000000001","anchor":{"kind":"FILE","path":"src/main/java/Order.java"},"direction":"OUTGOING","relationKinds":["CALL","CONSTRUCT","METHOD_REFERENCE"],"limit":20}
+```
+
+Kinds are `CALL`, `CONSTRUCT`, `METHOD_REFERENCE`, `EXTENDS`, `IMPLEMENTS`,
+`OVERRIDES`, `REFERENCE`, `HTTP_EVIDENCE`, `EVENT_EVIDENCE`, `DB_EVIDENCE`.
+Results carry `analysisLevel: STATIC`, exact source/index identity, capabilities,
+syntax and relation coverage, resolution provenance, whole facts and page metadata.
+`STATIC_RESOLVED` identifies a static written declaration or approved external
+signature, not runtime dispatch. `UNRESOLVED` has no target and a safe reason.
+Lambdas, initializers and anonymous methods have distinct execution scopes;
+navigation containers do not imply direct execution by the enclosing method.
+`executionScope.kind: CONSTRUCTOR` includes written compact record constructors;
+their body calls remain associated with the constructor's SOURCE_SYMBOL anchor.
+When present, a navigation container is the nearest published ancestor declaration
+covering both the occurrence and its execution scope. A field-type reference
+whose scope is the enclosing type therefore uses that type, not the narrower
+field declaration. Use a FILE anchor to include facts across its containers.
+Incoming matches recorded identities, never unresolved names or inferred joins.
+Outgoing is not a recursive traversal of nested declarations/callees.
+
+FILE responses disclose the normal file outcome and Relations status (`ANALYZED`,
+`OUT_OF_SCOPE`, `PARSE_FAILED`, `UNSUPPORTED`, `TOO_LARGE`), including empty results.
+Call coverage counts distinct occurrences, not repeated candidate associations.
+`coverage` and `relationCoverage` describe the whole generation, not the current
+anchor/filter. Count matched CALL rows only after reading every result page to
+`hasMore=false`; a partial page sequence is not a complete caller/callee list.
+At most 200,000 relation facts may publish; overflow fails rather than truncates.
+Empty results or complete syntactic coverage cannot establish runtime absence.
+Always confirm business claims with exact-context raw `read_source` evidence.
+
+Framework facts are **always `CANDIDATE`**, even with statically resolved APIs:
+
+| Family | Recognized written evidence | Not inferred |
+| --- | --- | --- |
+| Spring MVC / OpenFeign | Request/Get/Post/Put/Delete/PatchMapping; FeignClient | Combined runtime routes, client-to-server joins |
+| Kafka / Rabbit | KafkaListener, RabbitListener; typed KafkaTemplate.send / RabbitTemplate.convertAndSend | Producer/consumer joins, resolved placeholders, topicPattern as a literal channel |
+| JDBC | Connection.prepareStatement/prepareCall and Statement SQL methods | Runtime SQL/table lineage or DB connectivity |
+| JPA / Spring Data / MyBatis | javax/jakarta Entity/Table, Spring Data Query, MyBatis Select/Insert/Update/Delete | Entity name as table name or evaluated query expressions |
+
+Recognition basis is `STATIC_API`, `FULLY_QUALIFIED`, `DIRECT_IMPORT` or
+`AMBIGUOUS_SIMPLE`, with raw supporting type/import evidence. Bare `send/query/save`
+names do not prove a framework API. Argument roles require a verified overload;
+unknown overloads retain unresolved role names rather than guessing by arity.
+Only written literals are values: expressions are not constant-folded and
+`${...}` / `#{...}` remain written text with binding uncertainty.
+
+Continue with unchanged context, generation, anchor, direction, filters and limit,
+copying `page.nextCursor`. Ordering is BINARY occurrence path, start byte, kind,
+relation ID; Query revalidates actual previous-row membership. These cursors are
+continuation data, not authorization or `read_source` authenticated bookmarks.
+Source admission precedes capability checking. An exact expired generation fails,
+never switches to selected/current. A valid legacy generation without Relations
+returns `INDEX_CAPABILITY_UNAVAILABLE`; missing/corrupt capable projection returns
+`INDEX_UNAVAILABLE`. Response/deadline/shared-permit limits above apply unchanged.
 
 ## Release and recovery
 
@@ -692,7 +870,7 @@ For an index rollout/rebuild, first confirm the selected release has the require
 Preserve policy-2 source roots and receipts unchanged. Provision the separate
 index child and process-private JNI temp storage/permissions; deploy matching
 writer/reader releases with separate credentials and the two Query read-only
-mounts. Readers support the known profile 1/1 and new profile 2/2. Existing
+mounts. Readers support known profiles 1/1, 2/2 and 3/3. Existing
 historical generations remain readable under their compatible profile; do not
 rebuild a non-current revision. Prepare missing historical source only when an
 exact source read is needed; without a retained historical index, use source

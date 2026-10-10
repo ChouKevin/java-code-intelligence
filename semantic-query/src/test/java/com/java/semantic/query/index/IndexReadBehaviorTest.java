@@ -302,7 +302,7 @@ class IndexReadBehaviorTest {
         Coverage partial = new Coverage(1, 0, 1, 0, 0, 0, false);
         fixture.manifest = new IndexManifest(original.formatVersion(), original.context(), original.originFingerprint(),
                 original.indexGeneration(), original.sourceManifestDigest(), original.inventoryDigest(), original.profile(),
-                partial, original.databaseBytes(), original.databaseDigest(), original.preparedAt());
+                partial, original.databaseBytes(), original.databaseDigest(), original.preparedAt(), Optional.empty());
         fixture.seal();
         try (AdmittedSourceRevision source = fixture.admit()) {
             Result<Declaration> result = fixture.reader().outline(source, new OutlineRequest(fixture.context, "Names.java", 20, Optional.empty(), Optional.empty()));
@@ -331,7 +331,7 @@ class IndexReadBehaviorTest {
             IndexManifest original = fixture.manifest;
             fixture.manifest = new IndexManifest(1, original.context(), original.originFingerprint(), original.indexGeneration(),
                     original.sourceManifestDigest(), original.inventoryDigest(), new Profile(2, 1, "JavaParser", "future", "JAVA_21", true, 1),
-                    original.coverage(), original.databaseBytes(), original.databaseDigest(), original.preparedAt());
+                    original.coverage(), original.databaseBytes(), original.databaseDigest(), original.preparedAt(), Optional.empty());
             fixture.seal();
             assertThat(fixture.reader().discover(source).status()).isEqualTo(SemanticStatus.UNAVAILABLE);
             assertThatThrownBy(() -> fixture.reader().searchCode(source, fixture.search("A", Match.exact, 20, Optional.empty())))

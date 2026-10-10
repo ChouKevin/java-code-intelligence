@@ -1,11 +1,16 @@
 # Testing and verification
 
 Run authorized checks from the selected reactor/worktree root. They exercise
-source-first and lightweight syntax-index contracts, **not** target-repository
-business builds, model reasoning, production TLS or capacity. Phase 4–5 workloads
-are not prerequisites for Phase 3.
+source-first, syntax-index and opt-in static Relations contracts, **not** target-
+repository business builds, production TLS or operational capacity. Model reasoning
+requires the separate explicit agent lane below; native success is not agent proof.
 
-**Current Phase 3 status:** implementation, authorized local native verification
+**Phase 4 status:** local implementation and independent final review are complete.
+All four production findings and the expanded native-fixture finding are closed.
+Final ordinary/native evidence passed; Luna evidence is explicitly prior-snapshot.
+Image/CI and the external acceptance boundaries below remain unexecuted.
+
+**Historical Phase 3 status:** implementation, authorized local native verification
 and independent final review are complete. **Release acceptance remains
 incomplete** because image/CI and external deployment gates are unexecuted.
 The authorized local lane used resource prechecks, serial execution, 512 MiB
@@ -59,7 +64,7 @@ Deletions and both sides of renames count; mixed changes take the union.
 | Other Indexer/Query main Java (excluding the full-gate paths below) | yes | yes | no |
 | App resources/config/security/bootstrap, origin/startup/source admission and index parser/SQLite/publication/read paths | yes | yes | yes |
 | Ordinary test sources/helpers only | yes | no | no |
-| SourceMcpJourneyIT, native journey launcher, video source corpus | no | yes | no |
+| SourceMcpJourneyIT, SourceRelationsJourneyIT, NativeJourneySupport, native journey launcher, video source corpus | no | yes | no |
 | Dockerfiles, .env.example, image smoke launcher | no | no | yes |
 | Unknown/unavailable diff or explicit full gate | yes | yes | yes |
 
@@ -195,10 +200,10 @@ the full ordinary/journey/image final lanes. Authorized bounded local runs cover
 ordinary/native lanes only; image execution remains isolated and separately
 authorized. Written checks alone are not execution or release acceptance.
 
-Phase 3 image smoke additionally requires the actual packaged JavaParser and
-SQLite versions, exactly eight Query/three Indexer MCP tools, separate read-only
-source/index mounts, private JNI temp and real build/read of sealed SQLite
-generations. Its fixture exercises HTTP/MCP search/outline/entry candidates,
+The image smoke requires the actual packaged JavaParser/Symbol Solver 3.28.2 and
+SQLite 3.53.4.0, exactly nine Query/three Indexer MCP tools, separate read-only
+source/index mounts, private JNI temp and real child-built profile-3 SQLite
+generations. Its fixture exercises HTTP/MCP Relations, search/outline/entry candidates,
 raw-byte name citation, retained old A generation after explicitly refreshing the
 default branch back to A, rebuilding A, then refreshing back to B; a fresh process
 with impossible JNI extraction keeps the five source tools working before/after
@@ -246,12 +251,12 @@ data, volumes, developer clones or IDE tooling.
 | Check | Command | What it covers |
 | --- | --- | --- |
 | Ordinary native suite | `mvn --batch-mode --no-transfer-progress test` | Model, source/index behavior, HTTP/MCP/security and architecture; embedded SQLite, no external service |
-| Real native MCP journey | `SOURCE_TEST_RG=/absolute/path/to/rg scripts/test-source-mcp.sh` | Real disposable Git A/B, separate JVMs, SDK/HTTP, exact source/index behavior implemented by the completed journey |
-| Indexer image | `docker build -f Dockerfile.indexer -t java-source-indexer:phase3 .` | Writer artifact with JavaParser/SQLite and private JNI temp |
-| Query image | `docker build -f Dockerfile.query -t java-source-query:phase3 .` | Read-only source/index reader with ripgrep/SQLite and private JNI temp |
-| Started-image smoke | `QUERY_IMAGE=java-source-query:phase3 INDEXER_IMAGE=java-source-indexer:phase3 scripts/test-source-images.sh` | Real SQLite/source reads, eight/three MCP tools, private temp, A/B generations, native-failure source independence, distinct UID/read-only mounts and GC |
+| Real native MCP journeys | `SOURCE_TEST_RG=/absolute/path/to/rg scripts/test-source-mcp.sh` | Disposable Git A/B, separate packaged JVMs, real Relations worker/JNI, SDK/HTTP parity, pinned generations and raw bytes |
+| Indexer image | `docker build -f Dockerfile.indexer -t java-source-indexer:phase4 .` | Writer artifact with JavaParser/Symbol Solver/SQLite and private JNI temp |
+| Query image | `docker build -f Dockerfile.query -t java-source-query:phase4 .` | Read-only source/index reader with ripgrep/SQLite and private JNI temp |
+| Started-image smoke | `QUERY_IMAGE=java-source-query:phase4 INDEXER_IMAGE=java-source-indexer:phase4 scripts/test-source-images.sh` | Real SQLite/source/Relations reads, nine/three MCP tools, private temp, A/B generations, native-failure source independence, distinct UID/read-only mounts and GC |
 
-`SOURCE_TEST_RG` must point to a real executable ripgrep at an **absolute path**; when `/usr/bin/rg` is unavailable set the variable explicitly. The journey script checks Java 21, Git and rg, creates a new `mktemp` root, packages clean executable jars, runs only `SourceMcpJourneyIT` using the `deployed-it` profile, removes **only its disposable** Git/service roots and reports its artifact directory. It does not clear existing `data/`. Image smoke needs Docker, Git, curl, jq and jar and likewise uses a disposable root. Run the two image builds before image smoke; building images alone does not establish mount isolation.
+`SOURCE_TEST_RG` must point to a real executable ripgrep at an **absolute path**; when `/usr/bin/rg` is unavailable set the variable explicitly. The journey script checks Java 21, Git and rg, creates a new `mktemp` root, packages clean executable jars, runs `SourceMcpJourneyIT` and `SourceRelationsJourneyIT` using the `deployed-it` profile, removes **only its disposable** Git/service roots and reports its artifact directory. It does not clear existing `data/`. Image smoke needs Docker, Git, curl, jq and jar and likewise uses a disposable root. Run the two image builds before image smoke; building images alone does not establish mount isolation.
 
 The journey treats `semantic-indexer/fixtures/uat/video-service/` as source data,
 not a business project to build. External framework imports intentionally remain
@@ -262,6 +267,14 @@ deleted video fixture paths before running the local journey; tracked file edits
 use their working-tree bytes. Untracked reports, build outputs,
 test inputs and nested Git metadata are not fixture inputs. The order/payment
 business projects, unused version patch and standalone fixture-Maven gate are retired.
+
+The Relations journey creates a separate synthetic A/B repository and enables
+profile 3 without external framework JARs. It exercises overload/interface/missing-
+type precision, candidate framework evidence, HTTP/MCP parity, raw-byte citations,
+pinned continuation across refresh/rebuild, unchanged READY after a durable
+syntax-only capacity refusal, obsolete-generation collection and cold Query with
+Indexer stopped. It does not prove resolved Kafka/Rabbit artifact interpretation,
+runtime dispatch, external framework connections or a minimum generation TTL.
 
 Do not reuse old semantic-review or Git-review acceptance reports as Source MCP results. A successful native SDK journey is not evidence of OMP/Codex/Claude model use, private Git coverage, TLS or 50-user load. The [agent checklist](mcp-agent-acceptance.md) separates those layers.
 
@@ -279,6 +292,100 @@ socket and image checks do not establish idle-session capacity, external
 OMP/Codex/Claude model-client acceptance, private-production Git access, deployed
 TLS, or 50-user capacity. Image/mount checks and external release-environment
 acceptance remain separate from native source verification.
+
+### Repository onboarding local evidence — 2026-10-10
+
+The new onboarding skill and routing were exercised by a fresh operator agent on
+an owned disposable Java repository with a Maven descriptor and a genuine cached
+Apache Commons Lang dependency. This was actual registration, source preparation,
+dependency configuration and index preparation—not a plan-only or mocked run.
+No production Java changed; existing final Phase 4 executables and their recorded
+SHA-256 identities were reused, not rebuilt. No fresh ordinary-suite run is claimed.
+
+| Exercised boundary | Observed result |
+| --- | --- |
+| Operator onboarding | Distinct saved source/index request UUIDs; both jobs COMPLETE; exact current SHA and profile 3/3 generation retained |
+| Dependency selection | Exact POM property selected commons-lang3 3.20.0; cached 3.19.0 unused; approved input bytes/digest and source-root inventory verified |
+| Operator raw evidence | Three Query HTTP raw files matched exact Git bytes, blob IDs and content digests |
+| Fresh Query-only model | Explicit gpt-6-luna / Codex 0.162.1; final accepted run made 10 successful Query MCP calls with Indexer stopped |
+| Relations and citations | Two limit-1 CALL pages completed at the same pins; external Commons Lang and JDK targets distinguished; two raw MCP responses matched Git; four exact citations verified |
+| Description handoff | Source-grounded DRAFT/NOT_VERIFIED; no APPROVED hint published |
+| Independent review | Source-only/no-external mode gates corrected; final scoped prose and saved model evidence review READY, no remaining findings |
+
+The first model run inferred library null/blank semantics without reading its
+implementation/contract; the second corrected that but fabricated client-local
+file links. Neither was accepted despite exit 0. General external-API grounding
+and repository-relative citation guidance was corrected; the fresh third run
+passed without receiving oracle source or answers. The operator initially polled
+`status` instead of `phase`, causing extra read-only job lookups but no resubmission;
+the skill now names the actual completion field.
+
+Full operator receipts, dependency inventory, invocation, MCP JSONL, original
+answers, runtime hashes and root audits remain in ignored
+`.superpowers/sdd/2026-10-10-repo-onboarding/`. Exact identities are recorded in
+[agent acceptance](mcp-agent-acceptance.md#onboarding-observed-evidence--2026-10-10).
+Linux available memory was 17,732 MiB, swap use zero, and backing-host free memory
+7,149,272 KiB before this serial lane. Both parent JVMs used 256 MiB heaps and two
+active processors; only owned disposable services/data were used.
+
+This proof covers approved existing local JAR inputs, not automated artifact
+downloads, Maven/Gradle effective-model execution, private registries, complex
+multi-module dependency resolution or target builds. Same-user native processes
+do not establish OS mount/UID isolation or TLS. No Docker/images, CI, package
+installation, existing-service mutation or project commit/merge/push occurred.
+Conservative full selector output still selects ordinary/journey/images for the
+unpublished feature branch; selection is not new execution or image authorization.
+
+### Phase 4 local evidence — 2026-10-10
+
+The uncommitted `feature/phase4-relations` worktree uses baseline
+`c5d660e95e811ce8325fa063aea4d57f27870c7d`; the baseline alone does not identify
+the tested changes. Java 21.0.12.1, Maven 3.9.6 and real `/usr/bin/rg` ran in one
+serial lane after Linux/backing-host headroom checks, with bounded JVM heaps.
+
+| Exercised boundary | Observed result |
+| --- | --- |
+| Full ordinary reactor | **317 PASS**: Model 9, Indexer 172, Query 136; zero failures/errors/skips |
+| Packaged native journeys | **2 PASS** on identical final production executables: source/current journey and separately rerun exact A/B Relations journey |
+| Field-type relation provenance | Meaningful container/scope RED, then ordinary and actual FILE-query GREEN without weakening Query validation |
+| Real child JNI failure | FAILED/INDEX_UNAVAILABLE; selected READY receipts and exact manifest/database bytes unchanged; subsequent source preparation COMPLETE |
+| Final-review boundary corrections | Compact record-constructor navigation and approved JAR ID `java21` pass warm/cold native queries; actual parent SIGKILL/JNI recovery and interrupted cleanup-authority recovery pass focused and full ordinary checks |
+| Scope selector and shell syntax | 41 selector scenarios PASS; changed native/image/selector shell syntax PASS |
+| OpenAPI reader checks | YAML parsing and local references PASS: Indexer 26, Query 163; not full schema validation |
+| Explicit GPT 6 Luna / Codex 0.162.1 | PASS: 21 Query-only MCP calls, complete A/B pinned CALL chains and six raw Git-byte matches; zero Query errors |
+
+The Relations journey exercises real child-built profile-3 SQLite, static
+overloads/interface targets/unresolved calls, field shadowing/lambda scopes,
+framework candidates, exact raw Git-byte evidence, HTTP/MCP parity, retained A/B
+and same-SHA generation pins, capacity refusal preserving READY, guarded
+obsolete-generation expiry, and cold Query after Indexer stops.
+
+Four earlier explicit Luna attempts were **not accepted** despite CLI exit 0:
+disabled code-mode routing; stopping after lowercase `outgoing`; an answer that
+invented a second error despite one actual INVALID_ARGUMENT; and incomplete
+pagination with generation-wide coverage confused for filtered CALL counts.
+All traces remain local. The accepted run used explicit field/enum guidance and
+read both CALL chains to `hasMore=false`, counting actual rows rather than coverage.
+Its ten relation requests include a repeated successful two-page A prefix, then
+complete four-page A and B chains. Every continuation retained exact pins/filters.
+The [agent evidence](mcp-agent-acceptance.md#phase-4-luna-本機證據2026-10-10)
+records identities and cited conclusions. Tool-guidance changes were rebuilt and
+exercised by this client. Its accepted run preceded the four final-review production
+corrections; no new Luna run is claimed. The historical Query executable hash was
+not captured, and a separately captured dependency-JAR hash is not runtime identity.
+Final ordinary artifact 1193 and native artifacts 1194/1197 cover the corrections.
+Artifact 1194 passed the source journey but failed the expanded Relations fixture
+on a Git metadata trailing-newline comparison; artifact 1197 passed the corrected
+Relations-only rerun on identical production binaries. Raw source comparisons were
+not trimmed or weakened. Independent final review closed all findings with
+`READY_FOR_LOCAL_DELIVERY`; root accepted the local milestone.
+
+Real Kafka/Rabbit approved-artifact positive interpretation, independent
+association-count overflow beyond the earlier 64 MiB database limit, image/CI,
+production TLS/Git, idle-session and multi-user capacity remain unexercised.
+JDBC/static and absent-artifact uncertainty evidence do not substitute for
+Kafka/Rabbit artifact proof. No Docker, project commit/merge/push or existing
+service/data mutation was performed.
 
 ### Phase 3 local evidence — 2026-10-09
 

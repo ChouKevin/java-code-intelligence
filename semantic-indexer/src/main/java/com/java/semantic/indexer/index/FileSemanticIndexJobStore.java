@@ -30,7 +30,7 @@ import java.util.function.Predicate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
-/** Separate format-1 private namespace; every mutation is serialized and fsynced. */
+/** Private format-2 namespace, with legacy format-1 reads; mutations are serialized and fsynced. */
 public final class FileSemanticIndexJobStore {
     private static final String ATOMIC_WRITE_TEMP_PREFIX = ".source-";
     private static final String ATOMIC_WRITE_TEMP_SUFFIX = ".tmp";
@@ -46,15 +46,16 @@ public final class FileSemanticIndexJobStore {
         Objects.requireNonNull(ownership);
     }
 
-    public synchronized SemanticIndexJob admit(IndexBuildInput input, PreparationRequestId request, Optional<String> expectedSelection) {
+    public synchronized SemanticIndexJob admit(IndexBuildInput input, IndexJobId jobId, PreparationRequestId request,
+            Optional<String> expectedSelection, IndexAnalysisIntent analysis) {
         RepositoryId repository = new RepositoryId(input.context().repositoryId());
         Optional<SemanticIndexJob> prior = find(repository, request);
         if (prior.isPresent()) throw new PreparationRequestReusedException(new IndexJobId(prior.orElseThrow().jobId()), request);
         if (hasActive(repository)) throw new IndexJobAlreadyActiveException(repository);
-        SemanticIndexJob job = new SemanticIndexJob(SemanticIndexJob.FORMAT_VERSION, IndexJobId.create().value(),
+        SemanticIndexJob job = new SemanticIndexJob(SemanticIndexJob.FORMAT_VERSION, jobId.value(),
                 repository.value(), request.value(), input.context().revision(), input.originFingerprint(), input.sourceManifestDigest(),
                 input.sourceManifest().inventoryDigest(), input.generation(), expectedSelection, SemanticIndexJob.Phase.ACCEPTED,
-                Instant.now(), Optional.empty(), Optional.empty());
+                Instant.now(), Optional.empty(), Optional.empty(), Optional.of(analysis));
         scan(repository, existing -> {
             if (existing.indexGeneration().equals(job.indexGeneration())) throw new IllegalStateException("generation identity reused");
         });
@@ -100,7 +101,7 @@ public final class FileSemanticIndexJobStore {
         return failed;
     }
 
-    public synchronized void recover(IndexPublicationStore publications) {
+    public synchronized void recover(IndexPublicationStore publications, ResolutionInputStore inputs) {
         List<SemanticIndexJob> jobs = new ArrayList<>();
         // Validate every durable identity first, retaining only the bounded active set, not historical payloads.
         all(job -> { if (active(job)) jobs.add(job); });
@@ -114,9 +115,12 @@ public final class FileSemanticIndexJobStore {
                 else {
                     try {
                         publications.requireCurrent(job);
+                        inputs.requireAccepted(job);
                         acceptedJobs.put(job.repositoryId(), job);
                     } catch (IndexFailure failure) {
                         save(job.failed(failure.code().name()));
+                    } catch (PlatformIdentity.EnvironmentChangedException failure) {
+                        save(job.failed("ENVIRONMENT_CHANGED"));
                     } catch (IllegalStateException failure) {
                         save(job.failed("INDEX_UNAVAILABLE"));
                     }

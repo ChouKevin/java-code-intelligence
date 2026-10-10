@@ -3,7 +3,7 @@
 ## Purpose and modules
 
 The service prepares approved Git repositories at exact revisions and exposes
-immutable source evidence and optional Java syntax navigation through HTTP/MCP.
+immutable source evidence and optional Java syntax/static-relation navigation through HTTP/MCP.
 Source remains authoritative; index generations are separately published and
 rebuildable. Optional guides are `NOT_VERIFIED` hints, not instructions or facts.
 
@@ -14,7 +14,7 @@ rebuildable. Optional guides are `NOT_VERIFIED` hints, not instructions or facts
 | `semantic-model/` | Define source/index identity and publication contracts using only the JDK. |
 
 Query provides `list_repositories`, `get_context`, `list_files`, `search_text`,
-`read_source`, `search_code`, `get_outline` and `list_entry_points`. Private
+`read_source`, `search_code`, `get_outline`, `list_entry_points` and `find_relations`. Private
 Indexer provides `prepare_source`, `prepare_semantic_index` and `get_job`.
 HTTP and MCP share the application facade, validation, result and error contracts.
 
@@ -45,11 +45,24 @@ HTTP and MCP share the application facade, validation, result and error contract
 - JavaParser 3.28.2/JAVA_21 produces only written syntax; SQLite JDBC 3.53.4.0
   persists sealed generations. Return raw UTF-8 byte spans, provenance, profile,
   partial coverage and uncertainty; no generated members or resolved-runtime claims.
-- New index generations use schema/policy profile 2; readers and committed-receipt
-  recovery support known schema/policy profiles 1 and 2. Profile 1 remains readable
-  for syntax queries but has no fold capability; never rewrite sealed generations.
-- Pin canonical UUID generations in continuation. Rebuild retains prior generations
-  until guarded expiry; missing exact generation is an explicit error, never latest.
+- New syntax-only generations use schema/policy profile 2; explicitly enabled
+  Relations uses JavaParser Symbol Solver 3.28.2/profile 3. Readers and committed
+  receipt recovery support known profiles 1 (syntax), 2 (+folds), 3 (+relations).
+  Never rewrite sealed generations or generate implicit source members.
+- Freeze approved source roots, ordered local JAR bytes/digests and Java 21 identity
+  before semantic acceptance. Resolve platform → admitted source → approved JARs;
+  no application classpath, target execution, annotation processing or downloads.
+  Accepted inputs are private; Query receives only public provenance.
+- Use a bounded child JVM for index build and keep parent-only publication.
+  READY/GO fences the private worker lease; parent EOF terminates the child.
+  Hold parent/child source guards and the child lease through actual process cleanup.
+- `find_relations` requires exact context and canonical UUID generation on every page.
+  Source-symbol anchors allow both directions, external targets incoming only,
+  files outgoing only. Bind anchor/direction/filters/limit in continuation.
+  Return static declaration targets, uncertainty, coverage and raw spans;
+  framework HTTP/event/DB evidence is always CANDIDATE, never runtime/cross-repo joins.
+- Rebuild may retain prior generations until guarded collection, with no minimum
+  superseded-generation TTL. Missing exact generation is an explicit error, never latest.
 - Failed or interrupted source/index preparation preserves the existing READY publication.
   Source COMPLETE means source bytes are ready; syntax-index readiness remains separate.
 - `read_source` defaults to `view: auto`: no selector may use an eligible published
@@ -72,12 +85,15 @@ HTTP and MCP share the application facade, validation, result and error contract
   recovery to validated managed paths. Use fresh namespaces for policy 2.
 - Optional capacity thresholds account for private, source and index logical bytes
   and usable space before source resolution/after pinning/after export and during
-  index build. Refusals are durable failures, preserve READY and never force GC.
+  index build. Postacceptance refusals are durable failures; Relations input freezing
+  can refuse before acceptance. Both preserve READY and never force GC.
   Zero disables each threshold; checks are not quotas or rollback of committed receipts.
 - Source public manifest/state formats remain 1/policy 2 and private source jobs 2.
-  Index manifest format and private semantic jobs remain 1; profiles 1 and 2 are
-  separately versioned in `schemaVersion`/`policyVersion`. Jobs have an operation
-  discriminator; semantic receipts retain manifest/digest and job/request identity.
+  Index manifest/state format remains 1; new private semantic jobs use format 2
+  with frozen analysis intent. Legacy format-1 accepted jobs remain syntax profile 2;
+  committed receipts recover before consulting changed settings/JDK/cleaned inputs.
+  Profiles are separate `schemaVersion`/`policyVersion` contracts. Jobs have an
+  operation discriminator; semantic receipts retain manifest/digest and job/request identity.
   Never rewrite existing source bytes during index cutover.
 - Apply the same authorization, containment and exclusion policy to list, search
   and direct read. Preserve Unicode, CRLF, oversized-line/EOF continuation and
@@ -90,10 +106,16 @@ HTTP and MCP share the application facade, validation, result and error contract
 
 ## Repository onboarding skill
 
-When asked to add/onboard a repository or write/update its business description
-and navigation keywords, read [describe-repository](skills/describe-repository/SKILL.md)
-before drafting. Use approved exact-revision source and keep real drafts local.
-This skill does not authorize registration/preparation or change the MCP catalog.
+When asked to register/onboard a repository, prepare its dependencies/source/index,
+or enable JavaParser/Relations, read
+[onboard-repository](skills/onboard-repository/SKILL.md). It separates operator
+authorization, exact-source dependency preparation and Query-only acceptance;
+the skill itself grants no mutation, download or service-restart authority.
+
+For description-only requests or the description step of onboarding, read
+[describe-repository](skills/describe-repository/SKILL.md) before drafting.
+Use approved exact-revision source and keep real drafts local. Description
+drafting does not authorize registration/preparation or change the MCP catalog.
 
 When asked how business rules, calculations, eligibility or upgrade conditions,
 features, or service flows are implemented, read

@@ -1,12 +1,14 @@
 package com.java.semantic.indexer.uat;
 
+import com.java.semantic.model.index.IndexRepositoryState;
+import com.java.semantic.model.index.IndexRepositoryState.Receipt;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.io.IOException;
-import java.net.ServerSocket;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -23,12 +25,20 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.jar.JarFile;
+import java.util.zip.CRC32;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.java.semantic.indexer.uat.NativeJourneySupport.base;
+import static com.java.semantic.indexer.uat.NativeJourneySupport.freePort;
+import static com.java.semantic.indexer.uat.NativeJourneySupport.git;
+import static com.java.semantic.indexer.uat.NativeJourneySupport.stop;
 
 /** Real Git, two independent application jars and native MCP clients; no prepared source or fake source service. */
 @Tag("deployed-it")
@@ -53,6 +63,7 @@ class SourceMcpJourneyIT {
     private final String readToken = UUID.randomUUID().toString();
     private final Path rg = Path.of(System.getProperty("source.test.rg"));
     private String hintRevision;
+    private Path nativeDisabledJar;
 
     @Test
     void unprepared_to_two_immutable_revisions_and_cold_reader_with_real_source_provenance() throws Exception {
@@ -82,7 +93,7 @@ class SourceMcpJourneyIT {
             try (McpSyncClient privateMcp = mcp(index, adminToken); McpSyncClient sourceMcp = mcp(read, readToken)) {
                 assertTools(privateMcp, "prepare_source", "prepare_semantic_index", "get_job");
                 assertTools(sourceMcp, "list_repositories", "get_context", "list_files", "search_text", "read_source",
-                        "search_code", "get_outline", "list_entry_points");
+                        "search_code", "get_outline", "list_entry_points", "find_relations");
                 JsonNode unprepared = pair(sourceMcp, read, "get_context", Map.of("repositoryId", VIDEO), "context-unprepared");
                 assertThat(unprepared.get("sourceStatus").asString()).isEqualTo("NOT_PREPARED");
                 assertThat(unprepared.hasNonNull("context")).isFalse();
@@ -275,12 +286,19 @@ class SourceMcpJourneyIT {
             indexer = launch("indexer-native-disabled", indexPort);
             ready(indexer, index, "/index/repositories/video/jobs?requestId=" + firstRequest, adminToken, 200);
             try (McpSyncClient nativeAdmin = mcp(index, adminToken)) {
+                Map<String, Receipt> readyBeforeFailure = selectedIndexReceipts();
+                assertThat(readyBeforeFailure.get(b).manifest().indexGeneration()).isEqualTo(indexB.get("indexGeneration").asString());
+                Map<String, Map<String, String>> readyBytesBeforeFailure = selectedIndexHashes(readyBeforeFailure);
                 String failedRequest = requestId(VIDEO, "native-semantic-failure");
                 call(nativeAdmin, "prepare_semantic_index", Map.of("repositoryId", VIDEO, "requestId", failedRequest, "revision", b));
                 JsonNode failed = terminal(nativeAdmin, index, failedRequest);
                 assertThat(failed.get("operation").asString()).isEqualTo("prepare_semantic_index");
                 assertThat(failed.get("phase").asString()).isEqualTo("FAILED");
                 assertThat(failed.get("failureCode").asString()).isEqualTo("INDEX_UNAVAILABLE");
+                assertThat(selectedIndexReceipts()).as("real child JNI failure preserves prior selected READY receipts")
+                        .isEqualTo(readyBeforeFailure);
+                assertThat(selectedIndexHashes(readyBeforeFailure)).as("selected READY manifest/database bytes remain immutable")
+                        .isEqualTo(readyBytesBeforeFailure);
                 recoverBoth(nativeAdmin, index, failed);
                 String nextSource = requestId(VIDEO, "source-after-native-failure");
                 call(nativeAdmin, "prepare_source", Map.of("repositoryId", VIDEO, "requestId", nextSource, "revision", b));
@@ -304,7 +322,7 @@ class SourceMcpJourneyIT {
                     "", readToken).statusCode()).isEqualTo(404);
             try (McpSyncClient coldMcp = mcp(cold, readToken)) {
                 assertTools(coldMcp, "list_repositories", "get_context", "list_files", "search_text", "read_source",
-                        "search_code", "get_outline", "list_entry_points");
+                        "search_code", "get_outline", "list_entry_points", "find_relations");
                 JsonNode coldRepositories = pair(coldMcp, cold, "list_repositories", Map.of(),
                         "cold-repositories");
                 assertThat(coldRepositories.get("items").toString()).contains("\"video\"", b);
@@ -381,6 +399,7 @@ class SourceMcpJourneyIT {
         } finally {
             stop(query);
             stop(indexer);
+            if (Objects.nonNull(nativeDisabledJar)) Files.deleteIfExists(nativeDisabledJar);
         }
     }
 
@@ -657,18 +676,23 @@ class SourceMcpJourneyIT {
         boolean indexer = kind.startsWith("indexer");
         List<String> args = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx512m", "-XX:ActiveProcessorCount=2"));
-        Path nativeRoot = privateNativeDirectory(kind + "-sqlite-native-");
-        args.add("-Dorg.sqlite.tmpdir=" + nativeRoot);
-        if (kind.endsWith("native-disabled")) {
-            // A private empty directory serves both native search paths. The missing
-            // explicit library name disables extraction; java.library.path fences off
-            // the final System.loadLibrary fallback.
-            args.addAll(List.of("-Dorg.sqlite.lib.path=" + nativeRoot,
-                    "-Dorg.sqlite.lib.name=journey-no-sqlite-" + UUID.randomUUID() + ".so",
-                    "-Djava.library.path=" + nativeRoot));
+        if (!indexer) {
+            Path nativeRoot = privateNativeDirectory(kind + "-sqlite-native-");
+            args.add("-Dorg.sqlite.tmpdir=" + nativeRoot);
+            if (kind.endsWith("native-disabled")) {
+                // Query owns JNI directly: fence both explicit and system fallback paths.
+                args.addAll(List.of("-Dorg.sqlite.lib.path=" + nativeRoot,
+                        "-Dorg.sqlite.lib.name=journey-no-sqlite-" + UUID.randomUUID() + ".so",
+                        "-Djava.library.path=" + nativeRoot));
+            }
         }
-        args.addAll(List.of("-jar", System.getProperty(indexer ? "source.journey.indexer.jar" : "source.journey.query.jar"),
-                "--server.address=127.0.0.1", "--server.port=" + port));
+        Path executable = Path.of(System.getProperty(indexer ? "source.journey.indexer.jar" : "source.journey.query.jar"));
+        if (kind.equals("indexer-native-disabled")) {
+            Path runtime = privateNativeDirectory("indexer-native-disabled-runtime-");
+            nativeDisabledJar = indexerWithoutNativePayload(executable, runtime);
+            executable = nativeDisabledJar;
+        }
+        args.addAll(List.of("-jar", executable.toString(), "--server.address=127.0.0.1", "--server.port=" + port));
         if (indexer) {
             args.addAll(List.of("--semantic.source-admin-root=" + admin,
                     "--semantic.source-published-root=" + published,
@@ -713,6 +737,86 @@ class SourceMcpJourneyIT {
     private Path privateNativeDirectory(String prefix) throws IOException {
         return Files.createTempDirectory(work, prefix,
                 PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+    }
+
+    private Path indexerWithoutNativePayload(Path original, Path directory) throws Exception {
+        // Parent-only JVM flags intentionally do not cross the isolated worker launch.
+        // Remove real JNI resources from an owned deployment copy instead; keep every
+        // driver class and the trusted application/worker entrypoints unchanged.
+        for (String entry : System.getProperty("java.library.path", "").split(java.io.File.pathSeparator)) {
+            if (!entry.isEmpty()) {
+                assertThat(Files.exists(Path.of(entry).resolve(System.mapLibraryName("sqlitejdbc"))))
+                        .as("native-failure fixture requires no system sqlitejdbc fallback in %s", entry).isFalse();
+            }
+        }
+        Path driver = directory.resolve("original-sqlite-jdbc.jar");
+        Path stripped = directory.resolve("sqlite-jdbc-without-native.jar");
+        Path executable = directory.resolve("indexer-without-native.jar");
+        boolean complete = false;
+        try (JarFile application = new JarFile(original.toFile())) {
+            List<? extends ZipEntry> drivers = application.stream().filter(entry -> entry.getName().startsWith("BOOT-INF/lib/sqlite-jdbc-")
+                    && entry.getName().endsWith(".jar")).toList();
+            assertThat(drivers).as("exactly one real packaged SQLite JDBC dependency").hasSize(1);
+            ZipEntry dependency = drivers.getFirst();
+            try (InputStream input = application.getInputStream(dependency)) {
+                Files.copy(input, driver);
+            }
+            int removed = 0;
+            try (JarFile sqlite = new JarFile(driver.toFile());
+                    ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(stripped))) {
+                for (ZipEntry entry : java.util.Collections.list(sqlite.entries())) {
+                    if (entry.getName().startsWith("org/sqlite/native/")) {
+                        if (!entry.isDirectory()) removed++;
+                        continue;
+                    }
+                    assertThat(entry.getName()).as("fixture mutation must not invalidate a signed dependency")
+                            .doesNotEndWith(".SF").doesNotEndWith(".RSA").doesNotEndWith(".DSA");
+                    try (InputStream input = sqlite.getInputStream(entry)) {
+                        copyArchiveEntry(output, entry, input, entry.getSize(), entry.getCrc());
+                    }
+                }
+            }
+            assertThat(removed).as("genuine bundled JNI payloads removed").isPositive();
+            CRC32 checksum = new CRC32();
+            try (InputStream input = Files.newInputStream(stripped)) {
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) >= 0) checksum.update(buffer, 0, count);
+            }
+            try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(executable))) {
+                for (ZipEntry entry : java.util.Collections.list(application.entries())) {
+                    if (entry.getName().equals(dependency.getName())) {
+                        try (InputStream input = Files.newInputStream(stripped)) {
+                            copyArchiveEntry(output, entry, input, Files.size(stripped), checksum.getValue());
+                        }
+                    } else {
+                        try (InputStream input = application.getInputStream(entry)) {
+                            copyArchiveEntry(output, entry, input, entry.getSize(), entry.getCrc());
+                        }
+                    }
+                }
+            }
+            complete = true;
+            return executable;
+        } finally {
+            Files.deleteIfExists(driver);
+            Files.deleteIfExists(stripped);
+            if (!complete) Files.deleteIfExists(executable);
+        }
+    }
+
+    private static void copyArchiveEntry(ZipOutputStream output, ZipEntry original, InputStream input,
+            long size, long checksum) throws IOException {
+        ZipEntry copy = new ZipEntry(original.getName());
+        copy.setMethod(original.getMethod());
+        if (original.getMethod() == ZipEntry.STORED) {
+            // Spring Boot requires nested dependency JARs to remain STORED.
+            copy.setSize(size);
+            copy.setCrc(checksum);
+        }
+        output.putNextEntry(copy);
+        input.transferTo(output);
+        output.closeEntry();
     }
 
     private Map<String, Object> indexInput(String tool, JsonNode identity) {
@@ -1143,25 +1247,28 @@ class SourceMcpJourneyIT {
         throw new AssertionError("Application failed to start; inspect disposable work process log");
     }
 
-    private static void stop(Process process) throws Exception {
-        if (Objects.isNull(process)) {
-            return;
+
+    private Map<String, Receipt> selectedIndexReceipts() throws IOException {
+        IndexRepositoryState state = mapper.readValue(Files.readAllBytes(indexes.resolve(VIDEO).resolve("state.json")),
+                IndexRepositoryState.class);
+        Map<String, Receipt> selected = new java.util.TreeMap<>();
+        for (Map.Entry<String, IndexRepositoryState.RevisionIndexes> revision : state.revisions().entrySet()) {
+            revision.getValue().selectedGeneration().ifPresent(generation ->
+                    selected.put(revision.getKey(), revision.getValue().generations().get(generation)));
         }
-        process.destroy();
-        if (!process.waitFor(10, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
-        }
+        return selected;
     }
 
-    private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
+    private Map<String, Map<String, String>> selectedIndexHashes(Map<String, Receipt> receipts) throws Exception {
+        Map<String, Map<String, String>> hashes = new java.util.TreeMap<>();
+        for (Map.Entry<String, Receipt> receipt : receipts.entrySet()) {
+            Path generation = indexes.resolve(VIDEO).resolve("revisions").resolve(receipt.getKey())
+                    .resolve(receipt.getValue().manifest().indexGeneration());
+            Map<String, String> members = fileHashes(generation);
+            assertThat(members).containsOnlyKeys("manifest.json", "index.sqlite");
+            hashes.put(receipt.getKey(), members);
         }
-    }
-
-    private static String base(int port) {
-        return "http://127.0.0.1:" + port;
+        return hashes;
     }
 
     private Map<String, String> publishedHashes() throws Exception {
@@ -1206,31 +1313,6 @@ class SourceMcpJourneyIT {
         return Files.exists(checkout) ? checkout : work.resolve("checkout-disabled");
     }
 
-    private String git(Path cwd, String... args) throws Exception {
-        List<String> command = new ArrayList<>(List.of("git", "-C", cwd.toString()));
-        command.addAll(List.of(args));
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        java.util.concurrent.CompletableFuture<String> output = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            try (java.io.InputStream stream = process.getInputStream()) {
-                return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-            } catch (IOException exception) {
-                throw new java.io.UncheckedIOException(exception);
-            }
-        });
-        try {
-            if (!process.waitFor(15, TimeUnit.SECONDS)) {
-                throw new AssertionError("Timed out waiting for local Git fixture command");
-            }
-            String result = output.get(5, TimeUnit.SECONDS);
-            assertThat(process.exitValue()).as("Local Git fixture command failed").isZero();
-            return result;
-        } finally {
-            if (process.isAlive()) {
-                process.destroyForcibly();
-                process.waitFor(10, TimeUnit.SECONDS);
-            }
-        }
-    }
 
     private void save(String label, JsonNode value) throws Exception {
         Files.writeString(artifacts.resolve(label + ".json"), mapper.writeValueAsString(value));

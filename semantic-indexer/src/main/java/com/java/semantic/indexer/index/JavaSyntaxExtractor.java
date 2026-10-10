@@ -116,7 +116,11 @@ public final class JavaSyntaxExtractor implements SemanticIndexParser {
     }
 
     @Override
-    public synchronized ParsedFile parse(String generation, SourceInventoryEntry entry, byte[] source) {
+    public ParsedFile parse(String generation, SourceInventoryEntry entry, byte[] source) {
+        return parseUnit(generation, entry, source).syntax();
+    }
+
+    public synchronized ParsedJavaUnit parseUnit(String generation, SourceInventoryEntry entry, byte[] source) {
         String checkedGeneration = IndexContract.requireGeneration(generation);
         Objects.requireNonNull(entry, "source inventory entry");
         Objects.requireNonNull(source, "exact source bytes");
@@ -129,13 +133,13 @@ public final class JavaSyntaxExtractor implements SemanticIndexParser {
 
         boolean javaFile = entry.path().endsWith(".java");
         if (!javaFile) {
-            return emptyFile(entry, false, ParseStatus.UNSUPPORTED, List.of());
+            return ParsedJavaUnit.unparsed(emptyFile(entry, false, ParseStatus.UNSUPPORTED, List.of()));
         }
         if (source.length > IndexContract.MAX_FILE_BYTES) {
-            return emptyFile(entry, true, ParseStatus.TOO_LARGE, List.of());
+            return ParsedJavaUnit.unparsed(emptyFile(entry, true, ParseStatus.TOO_LARGE, List.of()));
         }
         if (entry.status().orElseThrow() != EntryStatus.TEXT) {
-            return emptyFile(entry, true, ParseStatus.UNSUPPORTED, List.of());
+            return ParsedJavaUnit.unparsed(emptyFile(entry, true, ParseStatus.UNSUPPORTED, List.of()));
         }
         requireContentIdentity(entry, source);
 
@@ -143,34 +147,35 @@ public final class JavaSyntaxExtractor implements SemanticIndexParser {
         try {
             sourceMap = RawJavaSourceMap.decode(source);
         } catch (CharacterCodingException exception) {
-            return failedFile(entry, List.of(new Diagnostic("INVALID_UTF8", Optional.empty())));
+            return ParsedJavaUnit.unparsed(failedFile(entry, List.of(new Diagnostic("INVALID_UTF8", Optional.empty()))));
         } catch (RawJavaSourceMap.InvalidUnicodeEscapeException exception) {
-            return failedFile(entry, List.of(new Diagnostic("JAVA_PARSE_FAILED", Optional.empty())));
+            return ParsedJavaUnit.unparsed(failedFile(entry, List.of(new Diagnostic("JAVA_PARSE_FAILED", Optional.empty()))));
         }
 
         try {
             ParseResult<CompilationUnit> parseResult = parser.parse(ParseStart.COMPILATION_UNIT,
                     Providers.provider(new StringReader(sourceMap.source())));
             if (!parseResult.getProblems().isEmpty()) {
-                return failedFile(entry, diagnostics(parseResult.getProblems(), sourceMap));
+                return ParsedJavaUnit.unparsed(failedFile(entry, diagnostics(parseResult.getProblems(), sourceMap)));
             }
             Optional<CompilationUnit> compilationUnit = parseResult.getResult();
             if (compilationUnit.isEmpty()) {
-                return failedFile(entry, List.of(new Diagnostic("JAVA_PARSE_FAILED", Optional.empty())));
+                return ParsedJavaUnit.unparsed(failedFile(entry, List.of(new Diagnostic("JAVA_PARSE_FAILED", Optional.empty()))));
             }
-            return materialize(checkedGeneration, entry, sourceMap, compilationUnit.orElseThrow());
+            return new ParsedJavaUnit(materialize(checkedGeneration, entry, sourceMap, compilationUnit.orElseThrow()),
+                    compilationUnit, Optional.of(sourceMap));
         } catch (IndexContract.InvalidUnicodeTextException exception) {
-            return emptyFile(entry, true, ParseStatus.UNSUPPORTED,
-                    List.of(new Diagnostic("UNSUPPORTED_UNICODE_VALUE", Optional.empty())));
+            return ParsedJavaUnit.unparsed(emptyFile(entry, true, ParseStatus.UNSUPPORTED,
+                    List.of(new Diagnostic("UNSUPPORTED_UNICODE_VALUE", Optional.empty()))));
         } catch (InvalidTranslatedEscapeException exception) {
-            return failedFile(entry, List.of(new Diagnostic("JAVA_PARSE_FAILED", Optional.empty())));
+            return ParsedJavaUnit.unparsed(failedFile(entry, List.of(new Diagnostic("JAVA_PARSE_FAILED", Optional.empty()))));
         } catch (UnmappableSourceRangeException exception) {
-            return failedFile(entry, List.of(new Diagnostic("SOURCE_RANGE_UNMAPPABLE", Optional.empty())));
+            return ParsedJavaUnit.unparsed(failedFile(entry, List.of(new Diagnostic("SOURCE_RANGE_UNMAPPABLE", Optional.empty()))));
         } catch (StackOverflowError exhaustedParserStack) {
             // Recursive parsing/AST visitors can exhaust the stack on bounded source. Discard all file facts
             // and the partially mutated parser; other VM failures must still propagate.
             parser = new JavaParser(parser.getParserConfiguration());
-            return failedFile(entry, List.of(new Diagnostic("PARSER_STACK_EXHAUSTED", Optional.empty())));
+            return ParsedJavaUnit.unparsed(failedFile(entry, List.of(new Diagnostic("PARSER_STACK_EXHAUSTED", Optional.empty()))));
         }
     }
 
@@ -431,7 +436,7 @@ public final class JavaSyntaxExtractor implements SemanticIndexParser {
         }
     }
 
-    private static Optional<List<String>> literalValues(Expression expression) {
+    static Optional<List<String>> literalValues(Expression expression) {
         if (expression instanceof ArrayInitializerExpr array) {
             List<String> values = new ArrayList<>(array.getValues().size());
             for (Expression element : array.getValues()) {

@@ -1,5 +1,6 @@
 package com.java.semantic;
 
+import com.java.semantic.indexer.index.IndexWorkerMain;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -10,6 +11,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
         "com.java.semantic.repository.config"})
 public class SemanticIndexerApplication {
     public static void main(String[] args) {
+        if (args.length == 2 && args[0].equals("--index-worker")) {
+            IndexWorkerMain.main(new String[] {args[1]});
+            return;
+        }
         SpringApplication.run(SemanticIndexerApplication.class, args);
     }
 }

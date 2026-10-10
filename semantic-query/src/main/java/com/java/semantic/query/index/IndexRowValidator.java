@@ -3,6 +3,7 @@ package com.java.semantic.query.index;
 import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.index.IndexContract.*;
 import com.java.semantic.model.index.IndexFailure;
+import com.java.semantic.model.index.RelationContract;
 import com.java.semantic.model.source.SourceInventoryEntry;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.source.SourcePathPolicy;
@@ -164,7 +165,7 @@ final class IndexRowValidator {
                 && range.startByte() == row.getLong("start_byte") && nameRange.startByte() == row.getLong("name_start_byte"));
     }
 
-    private void declaration(Declaration declaration) throws SQLException {
+    void declaration(Declaration declaration) throws SQLException {
         require(declaration.symbolId().equals(IndexContract.identity(generation, declaration.path(), declaration.kind().name(), Long.toString(declaration.nameRange().startByte()))));
         FileOutcome file = file(declaration.path(), false);
         require(file.status() == ParseStatus.PARSED && declaration.byteLength() == file.byteLength()
@@ -194,6 +195,32 @@ final class IndexRowValidator {
                 }
             }
         }
+    }
+
+    Declaration symbol(String id, boolean requested) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT symbol_id,path,name,kind,owner,parent_id,start_byte,name_start_byte,length(CAST(declaration_json AS BLOB)) AS payload_bytes,CASE WHEN length(CAST(declaration_json AS BLOB))<=163840 THEN declaration_json ELSE NULL END AS bounded_payload FROM declarations WHERE symbol_id=?")) {
+            statement.setString(1, id);
+            try (ResultSet row = statement.executeQuery()) {
+                if (!row.next()) throw new IndexFailure(requested ? IndexFailure.Code.INDEX_SYMBOL_NOT_FOUND : IndexFailure.Code.INDEX_UNAVAILABLE);
+                require(row.getLong("payload_bytes") <= IndexContract.MAX_RESULT_BYTES);
+                return row(row, Declaration.class);
+            }
+        }
+    }
+    void fileSource(FileOutcome file) {
+        if (file.status() == ParseStatus.PARSED || file.status() == ParseStatus.PARSE_FAILED) {
+            bytes(inventory.find(file.path()).orElseThrow());
+        }
+    }
+
+
+    void site(RelationContract.SourceSite site) {
+        FileOutcome file = file(site.path(), false);
+        require(file.status() == ParseStatus.PARSED && file.byteLength() == site.byteLength()
+                && file.blobId().orElseThrow().equals(site.blobId()) && file.contentDigest().orElseThrow().equals(site.contentDigest()));
+        byte[] bytes = bytes(inventory.find(site.path()).orElseThrow());
+        span(site.range(), bytes);
+        span(site.executionScope().range(), bytes);
     }
 
     private void sourceEvidence(Declaration declaration, byte[] bytes) {

@@ -4,6 +4,7 @@ import com.java.semantic.indexer.application.PreparationCoordinator;
 import com.java.semantic.indexer.index.FileSemanticIndexJobStore;
 import com.java.semantic.indexer.index.IndexPublicationStore;
 import com.java.semantic.indexer.index.SemanticIndexManager;
+import com.java.semantic.indexer.index.ResolutionInputStore;
 import com.java.semantic.indexer.source.RepositoryRegistry;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.SourceRepositoryDescriptor;
@@ -24,10 +25,12 @@ public final class IndexJobStartupRecovery implements ApplicationRunner {
     private final IndexPublicationStore indexes;
     private final SemanticIndexManager indexManager;
     private final RepositoryRegistry repositories;
+    private final ResolutionInputStore inputs;
 
     public IndexJobStartupRecovery(FileSourceJobStore jobs, SourcePublicationStore publications,
             ConfiguredRepositoryPublisher registry, PreparationCoordinator coordinator, FileSemanticIndexJobStore indexJobs,
-            IndexPublicationStore indexes, SemanticIndexManager indexManager, RepositoryRegistry repositories) {
+            IndexPublicationStore indexes, SemanticIndexManager indexManager, RepositoryRegistry repositories,
+            ResolutionInputStore inputs) {
         this.jobs = jobs;
         this.publications = publications;
         this.registry = registry;
@@ -36,6 +39,7 @@ public final class IndexJobStartupRecovery implements ApplicationRunner {
         this.indexes = indexes;
         this.indexManager = indexManager;
         this.repositories = repositories;
+        this.inputs = inputs;
     }
 
     @Override
@@ -44,9 +48,13 @@ public final class IndexJobStartupRecovery implements ApplicationRunner {
             registry.publish();
             coordinator.validateStartup();
             jobs.recover(publications);
-            indexJobs.recover(indexes);
+            inputs.recover(indexJobs);
+            indexJobs.recover(indexes, inputs);
             for (SourceRepositoryDescriptor descriptor : repositories.descriptors()) {
-                indexJobs.visit(new RepositoryId(descriptor.repositoryId()), indexManager::cleanupFailedStage);
+                indexJobs.visit(new RepositoryId(descriptor.repositoryId()), job -> {
+                    if (!inputs.hasLiveWorker(new RepositoryId(job.repositoryId()))) indexManager.cleanupFailedStage(job);
+                    inputs.cleanupTerminal(job);
+                });
             }
         }
     }

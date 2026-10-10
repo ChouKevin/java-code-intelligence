@@ -41,6 +41,11 @@ final class RawJavaSourceMap {
         return source;
     }
 
+    SourceSpan wholeFile() {
+        int end = byteOffsetByUtf16Offset[byteOffsetByUtf16Offset.length - 1];
+        return new SourceSpan(0, end, 1, lfLineAt(Math.max(0, end - 1)));
+    }
+
     Optional<SourceSpan> span(Range parserRange) {
         // The exclusive boundary includes the complete raw spelling of a final Unicode escape.
         Position parsedStart = parserRange.begin;

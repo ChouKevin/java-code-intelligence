@@ -95,6 +95,8 @@ class SourceTransportErrorParityTest {
                 IndexFailure.Code.INDEX_RESULT_TOO_LARGE, 413,
                 IndexFailure.Code.INDEX_UNAVAILABLE, 503,
                 IndexFailure.Code.INDEX_BUSY, 503,
+                IndexFailure.Code.INDEX_CAPABILITY_UNAVAILABLE, 409,
+                IndexFailure.Code.INDEX_SYMBOL_NOT_FOUND, 404,
                 IndexFailure.Code.INDEX_TIMEOUT, 504).entrySet()) {
             IndexFailure.Code code = caseUnderTest.getKey();
             String generation = UUID.randomUUID().toString();
@@ -103,7 +105,7 @@ class SourceTransportErrorParityTest {
                 @Override
                 public IndexContract.Discovery discover(AdmittedSourceRevision revision) {
                     return new IndexContract.Discovery(SemanticStatus.READY,
-                            Optional.of(new IndexContract.IndexSummary(generation, IndexContract.currentProfile(), coverage)));
+                            Optional.of(new IndexContract.IndexSummary(generation, IndexContract.syntaxProfile(), coverage, IndexContract.capabilities(IndexContract.syntaxProfile()))));
                 }
 
                 @Override
@@ -125,6 +127,12 @@ class SourceTransportErrorParityTest {
                 }
 
                 @Override
+                public com.java.semantic.model.index.RelationContract.Result findRelations(AdmittedSourceRevision revision,
+                        com.java.semantic.model.index.RelationContract.Request request) {
+                    throw new IndexFailure(code, new IllegalStateException("/private/index/path"));
+                }
+
+                @Override
                 public IndexContract.FoldResult folds(AdmittedSourceRevision revision, String path,
                         Optional<String> generation) {
                     throw new IndexFailure(code, new IllegalStateException("/private/index/path"));
@@ -136,15 +144,16 @@ class SourceTransportErrorParityTest {
                     .setControllerAdvice(new QueryApiExceptionHandler())
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper)).build();
             Map<String, Object> input = Map.of("context", Map.of("repositoryId", "sample", "revision",
-                    SourceFilesystemFixture.SHA), "query", "Order", "match", "exact");
-            String payload = http.perform(post("/api/v1/search-code").contentType("application/json")
+                    SourceFilesystemFixture.SHA), "indexGeneration", generation,
+                    "anchor", Map.of("kind", "FILE", "path", "Order.java"), "direction", "OUTGOING");
+            String payload = http.perform(post("/api/v1/relations").contentType("application/json")
                     .content(fixture.mapper.writeValueAsBytes(input))).andExpect(status().is(caseUnderTest.getValue()))
                     .andReturn().getResponse().getContentAsString();
             McpServerFeatures.SyncToolSpecification tool = new QueryMcpToolCatalogConfiguration()
                     .mcpQueryToolSpecifications(facade, fixture.mapper).stream()
-                    .filter(value -> value.tool().name().equals("search_code")).findFirst().orElseThrow();
+                    .filter(value -> value.tool().name().equals("find_relations")).findFirst().orElseThrow();
             McpSchema.CallToolResult mcp = tool.callHandler().apply(null,
-                    McpSchema.CallToolRequest.builder("search_code").arguments(input).build());
+                    McpSchema.CallToolRequest.builder("find_relations").arguments(input).build());
             JsonNode httpJson = fixture.mapper.readTree(payload);
             assertThat(httpJson).isEqualTo(fixture.mapper.readTree(fixture.mapper.writeValueAsString(mcp.structuredContent())));
             assertThat(fixture.mapper.readTree(((McpSchema.TextContent) mcp.content().getFirst()).text()))
@@ -153,6 +162,20 @@ class SourceTransportErrorParityTest {
             assertThat(httpJson.get("code").asString()).isEqualTo(code.name());
             assertThat(httpJson.get("message").asString()).isEqualTo(code.advice());
             assertThat(payload).doesNotContain("private", "index/path");
+            Map<String, Object> syntaxInput = Map.of("context", Map.of("repositoryId", "sample", "revision",
+                    SourceFilesystemFixture.SHA), "query", "Order", "match", "exact");
+            String syntaxPayload = http.perform(post("/api/v1/search-code").contentType("application/json")
+                    .content(fixture.mapper.writeValueAsBytes(syntaxInput))).andExpect(status().is(caseUnderTest.getValue()))
+                    .andReturn().getResponse().getContentAsString();
+            McpServerFeatures.SyncToolSpecification syntaxTool = new QueryMcpToolCatalogConfiguration()
+                    .mcpQueryToolSpecifications(facade, fixture.mapper).stream()
+                    .filter(value -> value.tool().name().equals("search_code")).findFirst().orElseThrow();
+            McpSchema.CallToolResult syntaxMcp = syntaxTool.callHandler().apply(null,
+                    McpSchema.CallToolRequest.builder("search_code").arguments(syntaxInput).build());
+            assertThat(fixture.mapper.readTree(syntaxPayload)).isEqualTo(httpJson);
+            assertThat(fixture.mapper.readTree(fixture.mapper.writeValueAsString(syntaxMcp.structuredContent()))).isEqualTo(httpJson);
+            assertThat(fixture.mapper.readTree(((McpSchema.TextContent) syntaxMcp.content().getFirst()).text())).isEqualTo(httpJson);
+            assertThat(syntaxMcp.isError()).isTrue();
         }
     }
 

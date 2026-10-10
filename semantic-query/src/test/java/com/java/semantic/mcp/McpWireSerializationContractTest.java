@@ -43,6 +43,15 @@ class McpWireSerializationContractTest {
             assertThat(result.get("structuredContent").get("code").asString()).isEqualTo("INVALID_ARGUMENT");
             assertThat(mapper.readTree(result.get("content").get(0).get("text").asString()))
                     .isEqualTo(result.get("structuredContent"));
+            tools.jackson.databind.JsonNode relations = client.call(mapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "id", 4, "method", "tools/call",
+                    "params", Map.of("name", "find_relations", "arguments", Map.of(
+                            "context", Map.of("repositoryId", "sample", "revision", SourceFilesystemFixture.SHA),
+                            "indexGeneration", "00000000-0000-0000-0000-000000000001",
+                            "anchor", Map.of("kind", "FILE", "path", "Order.java"), "direction", "OUTGOING"))))).get("result");
+            assertThat(relations.get("isError").asBoolean()).isTrue();
+            assertThat(relations.get("structuredContent").get("code").asString()).isEqualTo("INDEX_GENERATION_EXPIRED");
+            assertThat(mapper.readTree(relations.get("content").get(0).get("text").asString())).isEqualTo(relations.get("structuredContent"));
             tools.jackson.databind.JsonNode removed = client.call(mapper.writeValueAsString(Map.of(
                     "jsonrpc", "2.0", "id", 3, "method", "tools/call",
                     "params", Map.of("name", "resolve_runtime_calls", "arguments", Map.of()))));

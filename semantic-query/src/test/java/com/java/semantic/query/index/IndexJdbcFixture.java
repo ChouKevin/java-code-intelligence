@@ -51,6 +51,11 @@ final class IndexJdbcFixture {
 
     private IndexJdbcFixture(Path temporary, String revision, List<String> names, int signatureLength,
             Map<String, String> spellings, String text) throws Exception {
+        this(temporary, revision, names, signatureLength, spellings, text, "Names.java");
+    }
+
+    private IndexJdbcFixture(Path temporary, String revision, List<String> names, int signatureLength,
+            Map<String, String> spellings, String text, String path) throws Exception {
         this.spellings = Map.copyOf(spellings);
         this.text = text;
         context = new SourceContext("sample", revision);
@@ -59,8 +64,8 @@ final class IndexJdbcFixture {
         Files.createDirectories(tree); Files.createDirectories(lockRoot.resolve("sample"));
         if (!Files.exists(lockRoot.resolve("sample/read.lock"))) Files.write(lockRoot.resolve("sample/read.lock"), new byte[0]);
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
-        Files.write(tree.resolve("Names.java"), bytes);
-        entry = new SourceInventoryEntry("Names.java", EntryKind.FILE, Optional.of(EntryStatus.TEXT), bytes.length,
+        Files.write(tree.resolve(path), bytes);
+        entry = new SourceInventoryEntry(path, EntryKind.FILE, Optional.of(EntryStatus.TEXT), bytes.length,
                 Optional.of(revision), Optional.of(IndexPublicationReader.digest(bytes)));
         byte[] inventoryBytes = (mapper.writeValueAsString(entry) + "\n").getBytes(StandardCharsets.UTF_8);
         Files.write(inventory, inventoryBytes);
@@ -72,6 +77,7 @@ final class IndexJdbcFixture {
     }
 
     void publish(List<String> names, int signatureLength) throws Exception {
+        boolean javaFile = entry.path().endsWith(".java");
         String generation = UUID.randomUUID().toString();
         Path directory = root.resolve("sample/revisions").resolve(context.revision()).resolve(generation);
         Files.createDirectories(directory); database = directory.resolve("index.sqlite"); declarations.clear();
@@ -85,9 +91,11 @@ final class IndexJdbcFixture {
             sql.execute("CREATE INDEX candidate_source_order ON candidates(path,start_byte,kind,candidate_id)");
             sql.execute("CREATE TABLE folds (symbol_id TEXT PRIMARY KEY REFERENCES declarations(symbol_id), path TEXT NOT NULL REFERENCES files(path), kind TEXT NOT NULL, start_byte INTEGER NOT NULL, fold_json TEXT NOT NULL)");
             sql.execute("CREATE INDEX fold_source_order ON folds(path,start_byte,symbol_id)");
-            insert(connection, "INSERT INTO identity VALUES(1,?,?,?,?,?,?)", context.repositoryId(), context.revision(), generation, sourceDigest, sourceManifest.inventoryDigest(), mapper.writeValueAsString(IndexContract.currentProfile()));
-            FileOutcome file = new FileOutcome(entry.path(), true, ParseStatus.PARSED, entry.byteLength(), entry.blobId(), entry.contentDigest(), List.of());
-            insert(connection, "INSERT INTO files VALUES(?,?,?,?,?,?,?)", entry.path(), 1, "PARSED", entry.byteLength(), context.revision(), entry.contentDigest().orElseThrow(), mapper.writeValueAsString(file));
+            insert(connection, "INSERT INTO identity VALUES(1,?,?,?,?,?,?)", context.repositoryId(), context.revision(), generation, sourceDigest, sourceManifest.inventoryDigest(), mapper.writeValueAsString(IndexContract.syntaxProfile()));
+            FileOutcome file = new FileOutcome(entry.path(), javaFile, javaFile ? ParseStatus.PARSED : ParseStatus.UNSUPPORTED,
+                    entry.byteLength(), entry.blobId(), entry.contentDigest(), List.of());
+            insert(connection, "INSERT INTO files VALUES(?,?,?,?,?,?,?)", entry.path(), javaFile ? 1 : 0, file.status().name(),
+                    entry.byteLength(), context.revision(), entry.contentDigest().orElseThrow(), mapper.writeValueAsString(file));
             int searchStart = 0;
             for (String name : names) {
                 String spelling = spellings.getOrDefault(name, name);
@@ -103,9 +111,14 @@ final class IndexJdbcFixture {
                 searchStart = position + spelling.length();
             }
         }
-        manifest = new IndexManifest(1, context, "f".repeat(64), generation, sourceDigest, sourceManifest.inventoryDigest(), IndexContract.currentProfile(),
-                new Coverage(1, 1, 0, 0, 0, declarations.size(), true), Files.size(database), IndexPublicationReader.digest(Files.readAllBytes(database)), Instant.EPOCH);
+        manifest = new IndexManifest(1, context, "f".repeat(64), generation, sourceDigest, sourceManifest.inventoryDigest(), IndexContract.syntaxProfile(),
+                new Coverage(javaFile ? 1 : 0, javaFile ? 1 : 0, 0, 0, 0, declarations.size(), true),
+                Files.size(database), IndexPublicationReader.digest(Files.readAllBytes(database)), Instant.EPOCH, Optional.empty());
         seal();
+    }
+
+    static IndexJdbcFixture nonJava(Path temporary, String revision) throws Exception {
+        return new IndexJdbcFixture(temporary, revision, List.of(), 0, Map.of(), "Not Java source.\n", "README.md");
     }
 
     static IndexJdbcFixture callable(Path temporary, String revision, int trailingBlankLines) throws Exception {
@@ -149,7 +162,7 @@ final class IndexJdbcFixture {
         }
         manifest = new IndexManifest(manifest.formatVersion(), context, manifest.originFingerprint(), manifest.indexGeneration(),
                 sourceDigest, sourceManifest.inventoryDigest(), profile, manifest.coverage(), manifest.databaseBytes(),
-                manifest.databaseDigest(), manifest.preparedAt());
+                manifest.databaseDigest(), manifest.preparedAt(), Optional.empty());
         seal();
     }
 
@@ -187,9 +200,46 @@ final class IndexJdbcFixture {
         return fixture;
     }
 
+    void relations(List<RelationContract.Fact> facts, RelationContract.Coverage coverage) throws Exception {
+        RelationContract.Provenance provenance = new RelationContract.Provenance("d".repeat(64),
+                new RelationContract.Platform("21", "fixture", "a".repeat(64), "b".repeat(64)), List.of(""), List.of());
+        relations(facts, coverage, provenance);
+    }
+
+    void relations(List<RelationContract.Fact> facts, RelationContract.Coverage coverage,
+            RelationContract.Provenance provenance) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database); Statement sql = connection.createStatement()) {
+            sql.execute("CREATE TABLE relation_metadata(singleton INTEGER PRIMARY KEY CHECK(singleton=1),analysis_plan_digest TEXT NOT NULL,provenance_json TEXT NOT NULL,coverage_json TEXT NOT NULL)");
+            sql.execute("CREATE TABLE relation_files(path TEXT PRIMARY KEY REFERENCES files(path),status TEXT NOT NULL)");
+            sql.execute("CREATE TABLE external_targets(target_id TEXT PRIMARY KEY,artifact_id TEXT NOT NULL,target_json TEXT NOT NULL)");
+            sql.execute("CREATE TABLE relations(relation_id TEXT PRIMARY KEY,path TEXT NOT NULL REFERENCES files(path),start_byte INTEGER NOT NULL,kind TEXT NOT NULL,resolution_state TEXT NOT NULL,container_symbol_id TEXT REFERENCES declarations(symbol_id),target_symbol_id TEXT REFERENCES declarations(symbol_id),external_target_id TEXT REFERENCES external_targets(target_id),relation_json TEXT NOT NULL,CHECK(NOT(target_symbol_id IS NOT NULL AND external_target_id IS NOT NULL)))");
+            sql.execute("CREATE INDEX relation_outgoing ON relations(container_symbol_id,path,start_byte,kind,relation_id)");
+            sql.execute("CREATE INDEX relation_incoming ON relations(target_symbol_id,path,start_byte,kind,relation_id)");
+            sql.execute("CREATE INDEX relation_external ON relations(external_target_id,path,start_byte,kind,relation_id)");
+            sql.execute("CREATE INDEX relation_file_order ON relations(path,start_byte,kind,relation_id)");
+            insert(connection, "UPDATE identity SET profile_json=?", mapper.writeValueAsString(IndexContract.relationsProfile()));
+            insert(connection, "INSERT INTO relation_metadata VALUES(1,?,?,?)", provenance.analysisPlanDigest(), mapper.writeValueAsString(provenance), mapper.writeValueAsString(coverage));
+            if (entry.path().endsWith(".java")) insert(connection, "INSERT INTO relation_files VALUES(?,?)", entry.path(), "ANALYZED");
+            for (RelationContract.Fact fact : facts) {
+                if (fact.target().flatMap(RelationContract.Target::external).isPresent()) {
+                    RelationContract.ExternalTarget target = fact.target().orElseThrow().external().orElseThrow();
+                    insert(connection, "INSERT OR IGNORE INTO external_targets VALUES(?,?,?)", target.targetId(), target.artifactId(), mapper.writeValueAsString(target));
+                }
+                insert(connection, "INSERT INTO relations VALUES(?,?,?,?,?,?,?,?,?)", fact.relationId(), fact.source().path(), fact.source().range().startByte(),
+                        fact.kind().name(), fact.resolutionState().name(), fact.source().containerSymbolId().orElse(null),
+                        fact.target().flatMap(RelationContract.Target::source).map(value -> value.declaration().symbolId()).orElse(null),
+                        fact.target().flatMap(RelationContract.Target::external).map(RelationContract.ExternalTarget::targetId).orElse(null), mapper.writeValueAsString(fact));
+            }
+        }
+        manifest = new IndexManifest(manifest.formatVersion(), context, manifest.originFingerprint(), manifest.indexGeneration(), sourceDigest,
+                sourceManifest.inventoryDigest(), IndexContract.relationsProfile(), manifest.coverage(), manifest.databaseBytes(), manifest.databaseDigest(),
+                manifest.preparedAt(), Optional.of(provenance.analysisPlanDigest()));
+        seal();
+    }
+
     void seal() throws Exception {
         manifest = new IndexManifest(manifest.formatVersion(), context, manifest.originFingerprint(), manifest.indexGeneration(), sourceDigest,
-                sourceManifest.inventoryDigest(), manifest.profile(), manifest.coverage(), Files.size(database), IndexPublicationReader.digest(Files.readAllBytes(database)), Instant.EPOCH);
+                sourceManifest.inventoryDigest(), manifest.profile(), manifest.coverage(), Files.size(database), IndexPublicationReader.digest(Files.readAllBytes(database)), Instant.EPOCH, manifest.analysisPlanDigest());
         byte[] bytes = mapper.writeValueAsBytes(manifest);
         Files.write(database.resolveSibling("manifest.json"), bytes);
         IndexRepositoryState.Receipt receipt = new IndexRepositoryState.Receipt(manifest, IndexPublicationReader.digest(bytes), UUID.randomUUID().toString(), UUID.randomUUID().toString());

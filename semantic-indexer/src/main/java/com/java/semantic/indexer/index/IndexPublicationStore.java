@@ -67,9 +67,9 @@ public final class IndexPublicationStore {
     }
 
     public synchronized Receipt publish(SemanticIndexJob job, Path staging, IndexManifest manifest) {
-        requireIntent(job, manifest);
-        if (!manifest.profile().equals(IndexContract.currentProfile()))
+        if (!manifest.profile().equals(IndexContract.syntaxProfile()) && !manifest.profile().equals(IndexContract.relationsProfile()))
             throw new IndexFailure(IndexFailure.Code.INDEX_INCOMPATIBLE);
+        requireIntent(job, manifest);
         RepositoryId repository = new RepositoryId(job.repositoryId());
         synchronized (sources) {
             requireCurrent(job);
@@ -204,7 +204,9 @@ public final class IndexPublicationStore {
     private static void requireIntentFields(SemanticIndexJob job, IndexManifest manifest) {
         if (!manifest.context().equals(new SourceContext(job.repositoryId(), job.revision()))
                 || !manifest.originFingerprint().equals(job.originFingerprint()) || !manifest.indexGeneration().equals(job.indexGeneration())
-                || !manifest.sourceManifestDigest().equals(job.sourceManifestDigest()) || !manifest.inventoryDigest().equals(job.inventoryDigest()))
+                || !manifest.sourceManifestDigest().equals(job.sourceManifestDigest()) || !manifest.inventoryDigest().equals(job.inventoryDigest())
+                || job.acceptedAnalysis().filter(intent -> !manifest.profile().equals(intent.profile())
+                        || !manifest.analysisPlanDigest().equals(intent.analysisPlanDigest())).isPresent())
             throw new IllegalStateException("index manifest differs from accepted intent");
     }
     private Path generationPath(IndexManifest manifest) {

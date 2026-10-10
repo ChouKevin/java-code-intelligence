@@ -17,11 +17,18 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration
 public class IndexConfiguration {
     @Bean
-    public SemanticIndexParser semanticIndexParser() { return new JavaSyntaxExtractor(); }
+    public PlatformIdentity platformIdentity() { return new PlatformIdentity(); }
 
     @Bean
-    public SqliteIndexBuilder sqliteIndexBuilder(ObjectMapper mapper, SemanticIndexParser parser) {
-        return new SqliteIndexBuilder(mapper, parser);
+    public ResolutionInputStore resolutionInputs(RepositoryProperties properties, ObjectMapper mapper,
+            PlatformIdentity platform, RepositoryRegistry registry) {
+        return new ResolutionInputStore(properties, mapper, platform, registry);
+    }
+
+    @Bean
+    public IndexBuildExecutor indexBuildExecutor(ObjectMapper mapper, ResolutionInputStore inputs,
+            PlatformIdentity platform, RepositoryProperties properties) {
+        return new IndexBuildExecutor(mapper, inputs, platform, properties);
     }
 
     @Bean
@@ -57,8 +64,9 @@ public class IndexConfiguration {
 
     @Bean
     public SemanticIndexManager semanticIndexManager(FileSemanticIndexJobStore jobs, IndexSourceAccess sources,
-            SqliteIndexBuilder builder, IndexPublicationStore publications, RepositoryProperties properties) {
-        return new SemanticIndexManager(jobs, sources, builder, publications, properties);
+            IndexBuildExecutor builder, IndexPublicationStore publications, RepositoryProperties properties,
+            ResolutionInputStore inputs) {
+        return new SemanticIndexManager(jobs, sources, builder, publications, properties, inputs);
     }
 
     @Bean

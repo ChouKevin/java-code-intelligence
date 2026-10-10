@@ -16,6 +16,7 @@ class QueryArchitectureTest {
             .dependOnClassesThat().resideInAnyPackage(
                     "com.java.semantic", "com.java.semantic.indexer..", "com.java.semantic.semantic..",
                     "com.java.semantic.syntax..",
+                    "com.github.javaparser..",
                     "com.java.semantic.repository..", "com.java.semantic.callgraph..", "com.java.semantic.config..",
                     "com.java.semantic.diagnostic..",
                     "org.eclipse.jgit..",

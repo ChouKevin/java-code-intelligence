@@ -31,7 +31,7 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            fixture.jobs.admit(input, request, Optional.empty());
+            fixture.admit(input, request, Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             IndexManifest manifest = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse).build(input, fixture.stage(input), () -> { });
             Receipt committed = fixture.indexes.publish(running, fixture.stage(input), manifest);
@@ -40,7 +40,7 @@ class SemanticIndexRecoveryTest {
                     .isEqualTo(nextSource.context().revision()).isNotEqualTo(input.context().revision());
             // Crash window: publication committed, private job remains RUNNING; no complete() call.
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(fixture.properties, fixture.mapper, fixture.owner);
-            reopened.recover(fixture.indexes);
+            reopened.recover(fixture.indexes, fixture.inputs);
             SemanticIndexJob recovered = reopened.find(fixture.git.repository, request).orElseThrow();
             assertThat(recovered.phase()).isEqualTo(SemanticIndexJob.Phase.COMPLETE);
             assertThat(recovered.publication()).contains(committed);
@@ -49,7 +49,7 @@ class SemanticIndexRecoveryTest {
             assertThat(recovered.acceptedAt()).isEqualTo(running.acceptedAt());
             assertThat(reopened.claimNext()).isEmpty();
             assertThat(fixture.indexes.selected(input.context())).contains(committed);
-            assertThatThrownBy(() -> reopened.admit(fixture.input(input.context()), request, Optional.of(input.generation())))
+            assertThatThrownBy(() -> reopened.admit(fixture.input(input.context()), IndexJobId.create(), request, Optional.of(input.generation()), IndexAnalysisIntent.syntax()))
                     .isInstanceOf(PreparationRequestReusedException.class);
         }
     }
@@ -59,7 +59,7 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            fixture.jobs.admit(input, request, Optional.empty());
+            fixture.admit(input, request, Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             Path stage = fixture.stage(input);
             IndexManifest built = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse).build(input, stage, () -> { });
@@ -75,7 +75,7 @@ class SemanticIndexRecoveryTest {
             }
             IndexManifest manifest = new IndexManifest(built.formatVersion(), built.context(), built.originFingerprint(),
                     built.indexGeneration(), built.sourceManifestDigest(), built.inventoryDigest(), legacy, built.coverage(),
-                    Files.size(database), IndexFiles.digest(database), built.preparedAt());
+                    Files.size(database), IndexFiles.digest(database), built.preparedAt(), Optional.empty());
             Files.write(stage.resolve("manifest.json"), fixture.mapper.writeValueAsBytes(manifest));
             assertThatThrownBy(() -> fixture.indexes.publish(running, stage, manifest))
                     .isInstanceOfSatisfying(IndexFailure.class, failure -> assertThat(failure.code()).isEqualTo(IndexFailure.Code.INDEX_INCOMPATIBLE));
@@ -88,9 +88,15 @@ class SemanticIndexRecoveryTest {
                     input.originFingerprint(), Map.of(input.context().revision(), new RevisionIndexes(input.sourceManifestDigest(),
                             Optional.of(input.generation()), Map.of(input.generation(), committed))));
             Files.write(Path.of(fixture.properties.getIndexPublishedRoot()).resolve("orders/state.json"), fixture.mapper.writeValueAsBytes(state));
+            ObjectNode legacyJob = fixture.mapper.valueToTree(running);
+            legacyJob.put("formatVersion", 1);
+            legacyJob.remove("acceptedAnalysis");
+            Files.write(fixture.git.admin.resolve("index/jobs/orders").resolve(request.value() + ".json"), fixture.mapper.writeValueAsBytes(legacyJob));
+            fixture.properties.getRepositories().get("orders").getRelations().setEnabled(true);
+            fixture.inputs.cleanupTerminal(running.failed("WORKER_INTERRUPTED"));
             fixture.prepare("class A { int newer; }\n");
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(fixture.properties, fixture.mapper, fixture.owner);
-            reopened.recover(fixture.indexes);
+            reopened.recover(fixture.indexes, fixture.inputs);
             SemanticIndexJob recovered = reopened.find(fixture.git.repository, request).orElseThrow();
             assertThat(recovered.phase()).isEqualTo(SemanticIndexJob.Phase.COMPLETE);
             assertThat(recovered.publication()).contains(committed);
@@ -104,10 +110,10 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            SemanticIndexJob accepted = fixture.jobs.admit(input, request, Optional.empty());
+            SemanticIndexJob accepted = fixture.admit(input, request, Optional.empty());
             fixture.prepare("class A { int newer; }\n");
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(fixture.properties, fixture.mapper, fixture.owner);
-            reopened.recover(fixture.indexes);
+            reopened.recover(fixture.indexes, fixture.inputs);
             SemanticIndexJob failed = reopened.find(fixture.git.repository, request).orElseThrow();
             assertThat(failed.phase()).isEqualTo(SemanticIndexJob.Phase.FAILED);
             assertThat(failed.failureCode()).contains("INDEX_NOT_CURRENT");
@@ -125,13 +131,13 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            SemanticIndexJob accepted = fixture.jobs.admit(input, request, Optional.empty());
+            SemanticIndexJob accepted = fixture.admit(input, request, Optional.empty());
             ObjectNode originalIntent = fixture.mapper.valueToTree(accepted);
             originalIntent.put("inventoryDigest", "0".repeat(64));
             Files.write(fixture.git.admin.resolve("index/jobs/orders").resolve(request.value() + ".json"),
                     fixture.mapper.writeValueAsBytes(originalIntent));
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(fixture.properties, fixture.mapper, fixture.owner);
-            reopened.recover(fixture.indexes);
+            reopened.recover(fixture.indexes, fixture.inputs);
             SemanticIndexJob failed = reopened.find(fixture.git.repository, request).orElseThrow();
             assertThat(failed.phase()).isEqualTo(SemanticIndexJob.Phase.FAILED);
             assertThat(failed.failureCode()).contains("INDEX_NOT_CURRENT");
@@ -150,7 +156,7 @@ class SemanticIndexRecoveryTest {
     void new_publication_rechecks_current_after_build_without_rejecting_historical_reads() throws Exception {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
-            fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             IndexManifest manifest = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse)
                     .build(input, fixture.stage(input), () -> { });
@@ -170,16 +176,16 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            SemanticIndexJob accepted = fixture.jobs.admit(input, request, Optional.empty());
+            SemanticIndexJob accepted = fixture.admit(input, request, Optional.empty());
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(fixture.properties, fixture.mapper, fixture.owner);
-            reopened.recover(fixture.indexes);
+            reopened.recover(fixture.indexes, fixture.inputs);
             assertThat(reopened.find(fixture.git.repository, request)).contains(accepted);
             SemanticIndexJob running = reopened.claimNext().orElseThrow();
             assertThat(running.jobId()).isEqualTo(accepted.jobId());
             // Even a fully built directory has no authority without membership+receipt.
             new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse).build(input, fixture.stage(input), () -> { });
             FileSemanticIndexJobStore restarted = new FileSemanticIndexJobStore(fixture.properties, fixture.mapper, fixture.owner);
-            restarted.recover(fixture.indexes);
+            restarted.recover(fixture.indexes, fixture.inputs);
             SemanticIndexJob interrupted = restarted.find(fixture.git.repository, new IndexJobId(accepted.jobId())).orElseThrow();
             assertThat(interrupted.phase()).isEqualTo(SemanticIndexJob.Phase.FAILED);
             assertThat(interrupted.failureCode()).contains("WORKER_INTERRUPTED");
@@ -193,7 +199,7 @@ class SemanticIndexRecoveryTest {
     void sealed_but_uncommitted_generation_is_not_adopted_and_cannot_be_republished() throws Exception {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
-            fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             IndexManifest manifest = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse).build(input, fixture.stage(input), () -> { });
             // Materialize the crash window after atomic directory move, before authority replacement.
@@ -202,7 +208,7 @@ class SemanticIndexRecoveryTest {
             assertThat(Files.exists(fixture.generation(input))).isTrue();
             assertThat(fixture.indexes.receipt(running)).isEmpty();
             assertThatThrownBy(() -> fixture.indexes.publish(running, fixture.stage(input), manifest)).isInstanceOf(IndexFailure.class);
-            fixture.jobs.recover(fixture.indexes);
+            fixture.jobs.recover(fixture.indexes, fixture.inputs);
             assertThat(fixture.jobs.find(fixture.git.repository, new IndexJobId(running.jobId())).orElseThrow().failureCode())
                     .contains("WORKER_INTERRUPTED");
         }
@@ -213,14 +219,14 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            fixture.jobs.admit(input, request, Optional.empty());
+            fixture.admit(input, request, Optional.empty());
             Path committed = fixture.git.admin.resolve("index/jobs/orders").resolve(request.value() + ".json");
             String malformed = "{\"formatVersion\":1,\"jobId\":";
             Files.writeString(committed, malformed);
 
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(
                     fixture.properties, fixture.mapper, fixture.owner);
-            assertThatThrownBy(() -> reopened.recover(fixture.indexes)).isInstanceOf(IndexFailure.class);
+            assertThatThrownBy(() -> reopened.recover(fixture.indexes, fixture.inputs)).isInstanceOf(IndexFailure.class);
             assertThat(Files.readString(committed)).isEqualTo(malformed);
         }
     }
@@ -229,13 +235,13 @@ class SemanticIndexRecoveryTest {
     void unexpected_non_temporary_entry_fails_closed_during_recovery() throws Exception {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
-            fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
             Path unexpected = fixture.git.admin.resolve("index/jobs/orders/operator-note.tmp");
             Files.writeString(unexpected, "not a semantic job");
 
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(
                     fixture.properties, fixture.mapper, fixture.owner);
-            assertThatThrownBy(() -> reopened.recover(fixture.indexes)).isInstanceOf(IndexFailure.class);
+            assertThatThrownBy(() -> reopened.recover(fixture.indexes, fixture.inputs)).isInstanceOf(IndexFailure.class);
             assertThat(Files.exists(unexpected)).isTrue();
         }
     }
@@ -244,7 +250,7 @@ class SemanticIndexRecoveryTest {
     void temporary_named_symlink_fails_closed_instead_of_being_ignored() throws Exception {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
-            fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
             Path directory = fixture.git.admin.resolve("index/jobs/orders");
             Path temporary = Files.createTempFile(directory, ".source-", ".tmp");
             Files.delete(temporary);
@@ -253,7 +259,7 @@ class SemanticIndexRecoveryTest {
 
             FileSemanticIndexJobStore reopened = new FileSemanticIndexJobStore(
                     fixture.properties, fixture.mapper, fixture.owner);
-            assertThatThrownBy(() -> reopened.recover(fixture.indexes)).isInstanceOf(IndexFailure.class);
+            assertThatThrownBy(() -> reopened.recover(fixture.indexes, fixture.inputs)).isInstanceOf(IndexFailure.class);
             assertThat(Files.isSymbolicLink(temporary)).isTrue();
         }
     }
@@ -262,11 +268,11 @@ class SemanticIndexRecoveryTest {
     void duplicate_private_job_identity_fails_closed_before_recovery_rewrites_any_job() throws Exception {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
-            SemanticIndexJob accepted = fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            SemanticIndexJob accepted = fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
             Path original = fixture.git.admin.resolve("index/jobs/orders").resolve(accepted.requestId() + ".json");
             byte[] before = Files.readAllBytes(original);
             Files.write(original.resolveSibling(IndexArtifactFixture.request().value() + ".json"), before);
-            assertThatThrownBy(() -> fixture.jobs.recover(fixture.indexes)).isInstanceOf(IndexFailure.class);
+            assertThatThrownBy(() -> fixture.jobs.recover(fixture.indexes, fixture.inputs)).isInstanceOf(IndexFailure.class);
             assertThat(Files.readAllBytes(original)).isEqualTo(before);
         }
     }
@@ -276,12 +282,12 @@ class SemanticIndexRecoveryTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             PreparationRequestId request = IndexArtifactFixture.request();
-            fixture.jobs.admit(input, request, Optional.empty());
+            fixture.admit(input, request, Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             IndexManifest manifest = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse).build(input, fixture.stage(input), () -> { });
             fixture.indexes.publish(running, fixture.stage(input), manifest);
             Files.writeString(fixture.generation(input).resolve("index.sqlite"), "corrupt");
-            assertThatThrownBy(() -> fixture.jobs.recover(fixture.indexes)).isInstanceOf(IndexFailure.class);
+            assertThatThrownBy(() -> fixture.jobs.recover(fixture.indexes, fixture.inputs)).isInstanceOf(IndexFailure.class);
             assertThat(fixture.jobs.find(fixture.git.repository, request).orElseThrow().phase()).isEqualTo(SemanticIndexJob.Phase.RUNNING);
         }
     }

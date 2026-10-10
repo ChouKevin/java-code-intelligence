@@ -22,18 +22,20 @@ import java.util.Optional;
 public final class SemanticIndexManager {
     private final FileSemanticIndexJobStore jobs;
     private final IndexSourceAccess sources;
-    private final SqliteIndexBuilder builder;
+    private final IndexBuildExecutor builder;
+    private final ResolutionInputStore inputs;
     private final IndexPublicationStore publications;
     private final SourceCapacityGuard capacity;
     private final Path staging;
     private final Path sourceRoot;
 
-    public SemanticIndexManager(FileSemanticIndexJobStore jobs, IndexSourceAccess sources, SqliteIndexBuilder builder,
-            IndexPublicationStore publications, RepositoryProperties properties) {
+    public SemanticIndexManager(FileSemanticIndexJobStore jobs, IndexSourceAccess sources, IndexBuildExecutor builder,
+            IndexPublicationStore publications, RepositoryProperties properties, ResolutionInputStore inputs) {
         this.jobs = jobs;
         this.sources = sources;
         this.builder = builder;
         this.publications = publications;
+        this.inputs = inputs;
         capacity = new SourceCapacityGuard(properties);
         staging = Path.of(properties.getSourceAdminRoot()).toAbsolutePath().normalize().resolve("index/staging");
         sourceRoot = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize();
@@ -55,25 +57,42 @@ public final class SemanticIndexManager {
                         || !input.sourceManifest().inventoryDigest().equals(job.inventoryDigest())) {
                     throw new IllegalStateException("accepted index source changed");
                 }
-                IndexManifest manifest = builder.build(input, stage, capacity::check);
+                IndexManifest manifest = builder.build(input, job, stage, capacity::check);
                 capacity.check();
                 Receipt receipt = publications.publish(job, stage, manifest);
-                return jobs.complete(repository, id, receipt);
+                SemanticIndexJob complete = jobs.complete(repository, id, receipt);
+                inputs.cleanupTerminal(complete);
+                return complete;
             }
         } catch (IOException | RuntimeException failure) {
-            Optional<Receipt> committed = publications.receipt(job);
-            if (committed.isPresent()) return jobs.complete(repository, id, committed.orElseThrow());
-            String code = failure instanceof SourceCapacityGuard.CapacityException refused ? refused.failureCode()
-                    : failure instanceof IndexFailure index ? index.code().name() : "INDEX_UNAVAILABLE";
-            SemanticIndexJob failed = jobs.fail(repository, id, code);
-            cleanupFailedStage(failed);
-            return failed;
+            // Child cleanup restores cancellation before returning. Settle durable
+            // ownership with interruptible file IO, then restore the caller's signal.
+            boolean interrupted = Thread.interrupted();
+            try {
+                Optional<Receipt> committed = publications.receipt(job);
+                if (committed.isPresent()) {
+                    SemanticIndexJob complete = jobs.complete(repository, id, committed.orElseThrow());
+                    inputs.cleanupTerminal(complete);
+                    return complete;
+                }
+                String code = failure instanceof SourceCapacityGuard.CapacityException refused ? refused.failureCode()
+                        : failure instanceof IndexBuildExecutor.WorkerFailure worker ? worker.failureCode()
+                        : failure instanceof PlatformIdentity.EnvironmentChangedException ? "ENVIRONMENT_CHANGED"
+                        : failure instanceof IndexFailure index ? index.code().name() : "INDEX_UNAVAILABLE";
+                SemanticIndexJob failed = jobs.fail(repository, id, code);
+                cleanupFailedStage(failed);
+                inputs.cleanupTerminal(failed);
+                return failed;
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         }
     }
 
     /** Only a durable FAILED job authorizes removing its own never-published staging leaf. */
     public void cleanupFailedStage(SemanticIndexJob job) {
         if (job.phase() != SemanticIndexJob.Phase.FAILED) return;
+        if (inputs.hasLiveWorker(new RepositoryId(job.repositoryId()))) return;
         Path stage = staging.resolve(job.indexGeneration());
         try {
             IndexFiles.safe(stage);

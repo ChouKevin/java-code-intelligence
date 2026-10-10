@@ -93,7 +93,7 @@ public final class IndexerPreparationSchemas {
                         "INVALID_ARGUMENT", "REQUEST_ID_REUSED", "REQUEST_NOT_FOUND", "JOB_NOT_FOUND",
                         "REPOSITORY_NOT_FOUND", "REPOSITORY_ACTIVE", "SOURCE_UNAVAILABLE", "SOURCE_NOT_PREPARED",
                         "INDEX_NOT_PREPARED", "INDEX_NOT_CURRENT", "INDEX_UNAVAILABLE", "INDEX_INCOMPATIBLE",
-                        "INDEX_GENERATION_EXPIRED", "INDEX_RESULT_TOO_LARGE", "INDEX_BUSY", "INDEX_TIMEOUT")),
+                        "INDEX_CAPABILITY_UNAVAILABLE", "INDEX_GENERATION_EXPIRED", "INDEX_RESULT_TOO_LARGE", "INDEX_BUSY", "INDEX_TIMEOUT")),
                         "Stable safe error code; no internal exception text is returned."),
                 "message", field(text(), "Fixed recovery advice without secrets, filesystem paths or echoed arguments."),
                 "retryable", field(Map.of("type", "boolean"), "Whether the transport marks this failure as potentially retryable."),
@@ -141,15 +141,16 @@ public final class IndexerPreparationSchemas {
                 "coverage", field(coverage(), "Java syntax-index coverage for the generation."),
                 "databaseBytes", field(Map.of("type", "integer", "minimum", 1, "maximum", IndexContract.MAX_DATABASE_BYTES), "Sealed SQLite database size in bytes; maximum 67,108,864."),
                 "databaseDigest", field(sha256(), "SHA-256 digest of the sealed database artifact."),
-                "preparedAt", field(dateTime(), "Index build publication timestamp in ISO-8601 date-time form.")),
+                "preparedAt", field(dateTime(), "Index build publication timestamp in ISO-8601 date-time form."),
+                "analysisPlanDigest", nullable(sha256(), "Frozen analysis-plan identity: required for profile 3, absent/null for profiles 1/2; no private paths.")),
                 List.of("formatVersion", "context", "originFingerprint", "indexGeneration", "sourceManifestDigest", "inventoryDigest",
                         "profile", "coverage", "databaseBytes", "databaseDigest", "preparedAt"), "Immutable index publication manifest.");
     }
 
     private static Map<String, Object> profile() {
         return object(properties(
-                "schemaVersion", field(Map.of("type", "integer", "minimum", 1), "Index schema version."),
-                "policyVersion", field(Map.of("type", "integer", "minimum", 1), "Index policy version."),
+                "schemaVersion", field(Map.of("type", "integer", "enum", List.of(1, 2, 3)), "Known paired profiles: 1/1 syntax, 2/2 with folds, 3/3 with static Relations."),
+                "policyVersion", field(Map.of("type", "integer", "enum", List.of(1, 2, 3)), "Known paired profile policy version; Relations is opt-in and never upgrades sealed generations."),
                 "engine", field(text(), "Parser engine name."),
                 "version", field(text(), "Parser engine version."),
                 "languageLevel", field(text(), "Configured Java language level."),

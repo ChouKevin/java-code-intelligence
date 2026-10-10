@@ -5,6 +5,7 @@ import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.index.IndexContract.*;
 import com.java.semantic.model.index.IndexFailure;
 import com.java.semantic.model.index.IndexManifest;
+import com.java.semantic.model.index.RelationContract;
 import com.java.semantic.model.source.SourceInventoryEntry;
 import com.java.semantic.model.source.SourcePathPolicy;
 import com.java.semantic.model.source.SourceReadContract.EntryKind;
@@ -32,7 +33,7 @@ import java.util.Objects;
 import java.util.Optional;
 import tools.jackson.databind.ObjectMapper;
 
-/** Streams authorized inventory into a single immutable, syntax-only generation. */
+/** Streams authorized inventory and the accepted analysis profile into one immutable generation. */
 public final class SqliteIndexBuilder {
     private final ObjectMapper mapper;
     private final SemanticIndexParser parser;
@@ -43,8 +44,24 @@ public final class SqliteIndexBuilder {
     }
 
     public IndexManifest build(IndexBuildInput input, Path staging, Runnable capacityCheck) {
+        return build(input, staging, capacityCheck, IndexAnalysisIntent.syntax(), Optional.empty(), staging);
+    }
+
+    public IndexManifest build(IndexBuildInput input, Path staging, Runnable capacityCheck,
+            IndexAnalysisIntent analysis, Optional<ResolutionPlan> acceptedPlan, Path inputDirectory) {
+        Profile profile = analysis.profile();
+        if (IndexContract.supportsRelations(profile) != acceptedPlan.isPresent())
+            throw new IllegalArgumentException("accepted profile requires its frozen plan");
         capacityCheck.run();
         try {
+            if (acceptedPlan.isPresent()) {
+                ResolutionPlan plan = acceptedPlan.orElseThrow();
+                if (!plan.profile().equals(profile) || !plan.context().equals(input.context())
+                        || !plan.originFingerprint().equals(input.originFingerprint())
+                        || !plan.sourceManifestDigest().equals(input.sourceManifestDigest())
+                        || !plan.inventoryDigest().equals(input.sourceManifest().inventoryDigest()))
+                    throw new IOException("accepted analysis source identity mismatch");
+            }
             Path stage = staging.toAbsolutePath().normalize();
             IndexFiles.safe(stage);
             if (!stage.getFileName().toString().equals(input.generation())
@@ -63,7 +80,12 @@ public final class SqliteIndexBuilder {
             DurableSourceFiles.ensureDirectories(stage.getParent().getParent().getParent(), stage, DurableSourceFiles.Visibility.PRIVATE);
             Path database = stage.resolve("index.sqlite");
             long[] counts = new long[6];
-            try (Connection connection = open(database)) {
+            JavaSyntaxExtractor relationParser = acceptedPlan.isPresent()
+                    ? parser instanceof JavaSyntaxExtractor extractor ? extractor : new JavaSyntaxExtractor()
+                    : null;
+            try (Connection connection = open(database);
+                    SourceResolutionSession session = acceptedPlan.isPresent()
+                            ? new SourceResolutionSession(input, acceptedPlan.orElseThrow(), inputDirectory, relationParser) : null) {
                 try (Statement statement = connection.createStatement()) {
                     statement.execute("PRAGMA journal_mode=DELETE");
                     statement.execute("PRAGMA foreign_keys=ON");
@@ -76,21 +98,49 @@ public final class SqliteIndexBuilder {
                 try (PreparedStatement identity = connection.prepareStatement("INSERT INTO identity VALUES(1,?,?,?,?,?,?)")) {
                     identity.setString(1, input.context().repositoryId()); identity.setString(2, input.context().revision());
                     identity.setString(3, input.generation()); identity.setString(4, input.sourceManifestDigest());
-                    identity.setString(5, input.sourceManifest().inventoryDigest()); identity.setString(6, mapper.writeValueAsString(IndexContract.currentProfile()));
+                    identity.setString(5, input.sourceManifest().inventoryDigest()); identity.setString(6, mapper.writeValueAsString(profile));
                     identity.executeUpdate();
                 }
-                populate(connection, database, input, counts, capacityCheck);
+                populate(connection, database, input, counts, capacityCheck, session, relationParser);
+                if (Objects.nonNull(session)) {
+                    session.sealCatalogue();
+                    try (SqliteRelationProjection projection = new SqliteRelationProjection(connection, mapper, input, capacityCheck);
+                            Statement statement = connection.createStatement();
+                            ResultSet rows = statement.executeQuery("SELECT outcome_json FROM files WHERE java_file=1 ORDER BY path")) {
+                        JavaRelationExtractor relations = new JavaRelationExtractor();
+                        FrameworkEvidenceExtractor frameworks = new FrameworkEvidenceExtractor();
+                        while (rows.next()) {
+                            FileOutcome file = mapper.readValue(rows.getString(1), FileOutcome.class);
+                            RelationContract.FileStatus status = !session.inScope(file.path()) ? RelationContract.FileStatus.OUT_OF_SCOPE
+                                    : file.status() == ParseStatus.PARSED ? RelationContract.FileStatus.ANALYZED
+                                    : RelationContract.FileStatus.valueOf(file.status().name());
+                            projection.recordFile(new RelationContract.FileAnalysis(file, status));
+                            if (status == RelationContract.FileStatus.ANALYZED) {
+                                ParsedJavaUnit unit = session.unit(file.path());
+                                relations.extract(unit, session, projection::accept);
+                                frameworks.extract(unit, session, projection::accept);
+                            }
+                            capacityCheck.run();
+                        }
+                        ResolutionPlan plan = acceptedPlan.orElseThrow();
+                        RelationContract.Provenance provenance = new RelationContract.Provenance(
+                                analysis.analysisPlanDigest().orElseThrow(), plan.platform(), plan.sourceRoots(),
+                                plan.dependencies().stream().map(dependency -> new RelationContract.Artifact(
+                                        dependency.id(), dependency.digest(), dependency.byteLength(), dependency.order())).toList());
+                        projection.finish(projection.coverage(), provenance);
+                    }
+                }
                 connection.commit();
             }
             capacityCheck.run();
-            validateDatabase(database, input);
+            validateDatabase(database, input, analysis);
             noSidecars(database);
             long size = Files.size(database);
             if (size > IndexContract.MAX_DATABASE_BYTES) throw new IOException("database exceeds generation limit");
             Coverage coverage = new Coverage(counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[0] == counts[1]);
             IndexManifest manifest = new IndexManifest(IndexContract.FORMAT_VERSION, input.context(), input.originFingerprint(),
                     input.generation(), input.sourceManifestDigest(), input.sourceManifest().inventoryDigest(),
-                    IndexContract.currentProfile(), coverage, size, IndexFiles.digest(database), Instant.now());
+                    profile, coverage, size, IndexFiles.digest(database), Instant.now(), analysis.analysisPlanDigest());
             capacityCheck.run();
             DurableSourceFiles.atomicBytes(stage.resolve("manifest.json"), mapper.writeValueAsBytes(manifest),
                     IndexFiles.MAX_MANIFEST, DurableSourceFiles.Visibility.PRIVATE);
@@ -128,7 +178,8 @@ public final class SqliteIndexBuilder {
         }
     }
 
-    private void populate(Connection connection, Path database, IndexBuildInput input, long[] counts, Runnable capacityCheck) throws IOException, SQLException {
+    private void populate(Connection connection, Path database, IndexBuildInput input, long[] counts, Runnable capacityCheck,
+            SourceResolutionSession session, JavaSyntaxExtractor relationParser) throws IOException, SQLException {
         try (InputStream stream = new BufferedInputStream(Files.newInputStream(input.inventory(), LinkOption.NOFOLLOW_LINKS));
                 PreparedStatement files = connection.prepareStatement("INSERT INTO files VALUES(?,?,?,?,?,?,?)");
                 PreparedStatement declarations = connection.prepareStatement("INSERT INTO declarations VALUES(?,?,?,?,?,?,?,?,?)");
@@ -166,7 +217,11 @@ public final class SqliteIndexBuilder {
                         bytes = IndexFiles.read(sourcePath, IndexContract.MAX_FILE_BYTES);
                         if (bytes.length != entry.byteLength() || !DurableSourceFiles.sha256(bytes).equals(entry.contentDigest().orElseThrow()))
                             throw new IOException("source changed during read");
-                        parsed = parser.parse(input.generation(), entry, bytes);
+                        if (Objects.nonNull(session)) {
+                            ParsedJavaUnit unit = relationParser.parseUnit(input.generation(), entry, bytes);
+                            parsed = unit.syntax();
+                            session.observe(unit);
+                        } else parsed = parser.parse(input.generation(), entry, bytes);
                     } else {
                         parsed = outcome(entry, javaFile && entry.byteLength() > IndexContract.MAX_FILE_BYTES ? ParseStatus.TOO_LARGE : ParseStatus.UNSUPPORTED,
                                 javaFile ? "TOO_LARGE" : "NOT_JAVA");
@@ -273,7 +328,7 @@ public final class SqliteIndexBuilder {
     }
 
 
-    private void validateDatabase(Path database, IndexBuildInput input) throws SQLException, IOException {
+    private void validateDatabase(Path database, IndexBuildInput input, IndexAnalysisIntent analysis) throws SQLException, IOException {
         try (Connection connection = open(database); Statement statement = connection.createStatement()) {
             try (ResultSet integrity = statement.executeQuery("PRAGMA integrity_check")) {
                 if (!integrity.next() || !"ok".equals(integrity.getString(1)) || integrity.next()) throw new IOException("database integrity failure");
@@ -288,9 +343,11 @@ public final class SqliteIndexBuilder {
                         || !identity.getString("generation").equals(input.generation())
                         || !identity.getString("source_manifest_digest").equals(input.sourceManifestDigest())
                         || !identity.getString("inventory_digest").equals(input.sourceManifest().inventoryDigest())
-                        || !mapper.readValue(identity.getString("profile_json"), Profile.class).equals(IndexContract.currentProfile())
+                        || !mapper.readValue(identity.getString("profile_json"), Profile.class).equals(analysis.profile())
                         || identity.next()) throw new IOException("database identity mismatch");
             }
+            if (IndexContract.supportsRelations(analysis.profile()))
+                SqliteRelationProjection.validate(connection, mapper, analysis.analysisPlanDigest().orElseThrow());
             try (ResultSet rows = statement.executeQuery("SELECT * FROM files")) {
                 while (rows.next()) {
                     FileOutcome file = mapper.readValue(rows.getString("outcome_json"), FileOutcome.class);

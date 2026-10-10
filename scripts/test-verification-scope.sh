@@ -65,6 +65,8 @@ change sqlite-reader true true true semantic-query/src/main/java/com/java/semant
 change syntax-parser true true true semantic-indexer/src/main/java/com/java/semantic/indexer/index/JavaSyntaxExtractor.java
 change ordinary-tests true false false semantic-indexer/src/test/java/com/java/semantic/indexer/source/LocalSourceFixture.java
 change journey-test false true false semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java
+change relations-journey-test false true false semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceRelationsJourneyIT.java
+change journey-support false true false semantic-indexer/src/test/java/com/java/semantic/indexer/uat/NativeJourneySupport.java
 change journey-launcher false true false scripts/test-source-mcp.sh
 change video-data false true false semantic-indexer/fixtures/uat/video-service/src/main/java/com/example/video/Video.java
 change images false false true Dockerfile.indexer Dockerfile.query .env.example scripts/test-source-images.sh

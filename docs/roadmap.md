@@ -2,7 +2,12 @@
 
 ## 目前狀態
 
-Phase 1 source navigation、Phase 2 retention／容量門檻、Phase 3 lightweight Java index 與 Repository business discovery 已實作。本次 **MCP reading／default-branch current milestone 已完成實作、獨立 final review 與本機驗收**：248 ordinary tests、packaged native journey、真實 Codex／MCP 讀檔與引用流程均通過。**Release 尚未驗收**：image／CI／外部 syntax-index tools 模型操作／部署安全／容量 gates 仍未完成。最新證據見 [測試與驗收](operations/testing.md#mcp-reading-and-current-local-evidence--2026-10-09)。Phase 4–5 仍是規劃。
+Phase 1–3、Repository business discovery 與 MCP reading／default-branch current milestone 已完成。**Phase 4 Relations 本機 milestone 已完成：實作、最終 ordinary／native 驗證及 whole-branch final review 均已結案；Luna 驗收是 final-review 修正前快照的獨立證據。** Phase 5 未啟動。**Release 尚未驗收**：image／CI／正式部署安全與容量 gates 未執行。最新證據見 [測試與驗收](operations/testing.md#phase-4-local-evidence--2026-10-10)。
+
+**Repository onboarding／依賴準備 skill 已完成小型專案的新 agent 實測**，包含
+最新 production executables 上的独立 Query-only Luna 驗收；這是新增的窄範圍證據，
+不是重新執行上述 Phase 4 全部 A/B 案例。見
+[onboarding 驗收](operations/testing.md#repository-onboarding-local-evidence--2026-10-10)。
 
 ## 不變原則
 
@@ -82,7 +87,7 @@ gcRunId 操作 log 與應用層容量門檻；不增加 worker 或管理 API。
 
 - 選定 JavaParser core `3.28.2`／`JAVA_21`、一次 JLS 3.3 Unicode translation／raw-boundary mapping／tab size 1 與 SQLite JDBC `3.53.4.0`。Indexer syntax-only，不 build repo、resolve classpath 或生成 methods；parser stack exhaustion 只令該檔 PARSE_FAILED，無 partial facts。
 - Query 增加 `search_code`、`get_outline`、`list_entry_points`（總共八 tools）；Private Indexer 增加 `prepare_semantic_index`（總共三 tools）。先明確 prepare exact source，再以新的 canonical UUID prepare index；原始 request recovery 與跨兩種 jobs 的單一 repo admission 保留。
-- Source context 固定 repository／40-lowercase SHA；每個 SHA 有獨立 selected canonical UUID index generation。A／B 可同時讀；新建或 rebuild 索引限 exact published current，舊 generation 在合法 expiry 前保留，cursor 不偷換 generation。Phase 3 原始「current B 時 rebuild A」驗證是舊政策歷史證據，不是現行操作方式。
+- Source context 固定 repository／40-lowercase SHA；每個 SHA 有獨立 selected canonical UUID index generation。A／B 可同時讀；新建或 rebuild 索引限 exact published current。舊 generation 只在仍保留時可讀，沒有最短 TTL，cursor 不偷換 generation。Phase 3 原始「current B 時 rebuild A」驗證是舊政策歷史證據，不是現行操作方式。
 - Sealed SQLite 與 read-only Query index mount 獨立於 source；JNI 使用 UID-owned 私有可寫／可載入 temp，不能使用 published mounts。容量門檻計入 private／source／index（包含 retained generations），不 force GC。
 - Results 明確帶 profile、Java coverage、syntax analysis level、raw UTF-8 byte ranges、blob/content provenance、annotation ambiguity／unresolved values；parse failed／too large 如實表示，無 generated facts。
 - 本機 journey 已跑通真實 Git A／B、SQLite build/read、三 index tools 的 HTTP／MCP parity、job receipts、generation-bound continuation／expiry、partial coverage、byte-limited pages，以及 oversized parent／可讀 child。
@@ -145,13 +150,47 @@ contexts in every final answer; the original deviation remains recorded.
 
 ## Phase 4 — Relations
 
-下一個功能階段；尚未啟動。caller/callee 不納入已完成的 MCP reading milestone。
+**本機實作與驗收完成；whole-branch final review 無未結案 findings。**
+caller/callee 不屬於前一個 MCP reading milestone。
 
-- 新增 `find_relations`：caller、callee、implementation、reference、HTTP、event、DB evidence。
-- 區分 syntax candidate、resolved relation、external／unresolved target；不可把名稱相同當作已確認呼叫。
-- 每個可定位的端點都能回到同一 repo/revision/path/range。
-- 驗收：已知 fixture 正例與 ambiguity／unresolved 反例；停用 relations 不影響 Phase 1–3。
-- 回退：撤除 relation projection/tool，保留 source 與 symbol index。
+- Indexer opt-in JavaParser Symbol Solver 3.28.2；durably frozen roots、approved
+  ordered local JARs、Java 21 identity，獨立有界 child JVM 建 profile 3。
+- `find_relations`／`POST /api/v1/relations` 使用 exact context＋必填 generation，
+  提供 static CALL／CONSTRUCT／METHOD_REFERENCE／EXTENDS／IMPLEMENTS／OVERRIDES／
+  REFERENCE 與候選 HTTP／event／DB evidence；不是 runtime call graph 或跨 repo join。
+- 保留 syntax-only profile 2 預設與 profile 1/2 歷史讀取；停用 Relations 不影響
+  source/raw/fold/syntax 導覽，既有 sealed generation 不重寫。
+- 最終 ordinary：317 tests PASS（Model 9／Indexer 172／Query 136）。
+  相同最終 production executables 的 source 與 Relations native journeys 各自 PASS，
+  含真實 worker/JNI failure、READY preservation、A/B／rebuild pins、raw Git
+  bytes、expiry、compact constructor、approved JAR `java21` 與 cold Query。
+- 明確 `gpt-6-luna`／Codex 0.162.1：21 次 Query-only MCP calls、A/B 各四頁 CALL
+  讀完、六次 raw byte 核對、正確 static/interface/unresolved 限制與 exact 引用。
+  先前四輪不完整／錯誤結果仍保留；不把 CLI exit 0 當成驗收。
+  此為 final-review 修正前快照的驗收；修正後由 ordinary／native 驗證，未重新跑 Luna。
+- 已結案：compact constructor、artifact provenance、parent-death worker temp 與
+  interrupted cleanup authority 四項 production findings，及新增 native fixture
+  的 incoming-row／Git metadata assertion 修正。Image／CI／正式部署安全與容量未執行；
+  Kafka/Rabbit 真實 approved-artifact positive 與獨立 association overflow 未實測，
+  不由 JDBC、uncertainty、資料庫容量或本機結果推定。
+- 安全回退先停用新 Relations admission，保留 source 與受支援 sealed generations；
+  舊程式遇到 profile 3 應明確不相容，不得偽裝 profile 2 或改寫 publication。
+
+## Repository onboarding and dependency preparation — locally verified
+
+- 新增 [onboard-repository](../skills/onboard-repository/SKILL.md)，串接明確授權、
+  registration／allowlist、exact-current source、source roots／核准 JAR、syntax
+  或 opt-in Relations、Query 驗收及 DRAFT 描述交接；AGENTS／README 已導向此入口。
+- 新 operator agent 實際 onboard 一次性小型 Maven-descriptor repo，依 exact POM
+  選定 Commons Lang 3.20.0，未使用另一個 3.19.0 cache；source／profile-3 index
+  均 COMPLETE，external JAR target 與 digest 經 raw source 核對。
+- 停止 Indexer 後，獨立 `gpt-6-luna` 完成 10 次 Query-only calls、兩頁 CALL、
+  兩個 raw Git-byte 核對及四個 exact repo/SHA/path/line 引用。
+- 前兩輪模型回答因擴大外部 API 行為主張、產生虛構 client-local 引用而未通過；
+  已補一般 grounding／citation 規則，保留失敗證據並以新的第三輪驗收。
+- 不新增 Indexer 自動下載或建置功能。未驗證 Maven／Gradle effective-model
+  執行、私有套件下載、多模組複雜依賴、正式部署或 image／CI；不宣稱所有 repo
+  均可自動成功。Phase 5 未啟動。
 
 ## Phase 5 — Cross-repo Intelligence
 

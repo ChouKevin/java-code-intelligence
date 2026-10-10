@@ -16,12 +16,15 @@ import java.util.Optional;
 public record SemanticIndexJob(int formatVersion, String jobId, String repositoryId, String requestId,
         String revision, String originFingerprint, String sourceManifestDigest, String inventoryDigest,
         String indexGeneration, Optional<String> expectedSelection, Phase phase, Instant acceptedAt,
-        Optional<Receipt> publication, Optional<String> failureCode) implements PreparationJob {
-    public static final int FORMAT_VERSION = 1;
+        Optional<Receipt> publication, Optional<String> failureCode,
+        Optional<IndexAnalysisIntent> acceptedAnalysis) implements PreparationJob {
+    public static final int FORMAT_VERSION = 2;
     public enum Phase { ACCEPTED, RUNNING, COMPLETE, FAILED }
 
     public SemanticIndexJob {
-        ModelValidation.require(formatVersion == FORMAT_VERSION, "unsupported private index job format");
+        ModelValidation.require(formatVersion == 1 || formatVersion == FORMAT_VERSION, "unsupported private index job format");
+        acceptedAnalysis = Objects.isNull(acceptedAnalysis) ? Optional.empty() : acceptedAnalysis;
+        ModelValidation.require((formatVersion == FORMAT_VERSION) == acceptedAnalysis.isPresent(), "invalid accepted analysis format");
         jobId = new IndexJobId(jobId).value();
         repositoryId = new RepositoryId(repositoryId).value();
         requestId = new PreparationRequestId(requestId).value();
@@ -48,14 +51,21 @@ public record SemanticIndexJob(int formatVersion, String jobId, String repositor
                     && receipt.manifest().sourceManifestDigest().equals(sourceManifestDigest)
                     && receipt.manifest().inventoryDigest().equals(inventoryDigest)
                     && receipt.manifest().originFingerprint().equals(originFingerprint), "publication intent mismatch");
+            if (acceptedAnalysis.isPresent()) {
+                IndexAnalysisIntent intent = acceptedAnalysis.orElseThrow();
+                ModelValidation.require(receipt.manifest().profile().equals(intent.profile())
+                        && receipt.manifest().analysisPlanDigest().equals(intent.analysisPlanDigest()), "publication analysis mismatch");
+            }
         }
     }
 
+    /** Legacy queued work never acquires new Relations settings. */
+    public IndexAnalysisIntent analysis() { return acceptedAnalysis.orElseGet(IndexAnalysisIntent::syntax); }
     public SemanticIndexJob withPhase(Phase next) { return changed(next, Optional.empty(), Optional.empty()); }
     public SemanticIndexJob completed(Receipt receipt) { return changed(Phase.COMPLETE, Optional.of(receipt), Optional.empty()); }
     public SemanticIndexJob failed(String code) { return changed(Phase.FAILED, Optional.empty(), Optional.of(code)); }
     private SemanticIndexJob changed(Phase next, Optional<Receipt> receipt, Optional<String> code) {
         return new SemanticIndexJob(formatVersion, jobId, repositoryId, requestId, revision, originFingerprint,
-                sourceManifestDigest, inventoryDigest, indexGeneration, expectedSelection, next, acceptedAt, receipt, code);
+                sourceManifestDigest, inventoryDigest, indexGeneration, expectedSelection, next, acceptedAt, receipt, code, acceptedAnalysis);
     }
 }

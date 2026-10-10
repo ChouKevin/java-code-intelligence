@@ -328,7 +328,7 @@ class BoundedSourceReaderTest {
     private static IndexContract.FoldResult foldResult(SourceFilesystemFixture fixture, String generation,
             IndexContract.ParseStatus status, boolean capable, List<IndexContract.Fold> folds) {
         com.java.semantic.model.source.SourceInventoryEntry entry = fixture.entries.getFirst();
-        return new IndexContract.FoldResult(generation, capable ? IndexContract.currentProfile()
+        return new IndexContract.FoldResult(generation, capable ? IndexContract.syntaxProfile()
                 : new IndexContract.Profile(1, 1, "JavaParser", "3.28.2", "JAVA_21", true, 1),
                 new IndexContract.FileOutcome(entry.path(), true, status, entry.byteLength(), entry.blobId(), entry.contentDigest(), List.of()), capable, folds);
     }

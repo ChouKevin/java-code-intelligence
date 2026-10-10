@@ -39,7 +39,7 @@ while IFS= read -r -d '' path; do
     README.md|AGENTS.md|docs/*) ;;
     pom.xml|semantic-model/*|semantic-indexer/pom.xml|semantic-query/pom.xml|.github/*|scripts/verification-scope.sh|scripts/test-verification-scope.sh)
       unit=true journey=true images=true ;;
-    semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java|scripts/test-source-mcp.sh|semantic-indexer/fixtures/uat/video-service/*)
+    semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java|semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceRelationsJourneyIT.java|semantic-indexer/src/test/java/com/java/semantic/indexer/uat/NativeJourneySupport.java|scripts/test-source-mcp.sh|semantic-indexer/fixtures/uat/video-service/*)
       journey=true ;;
     */src/main/java/*/ApprovedOriginBinding.java|*/src/main/java/*/IndexJobStartupRecovery.java)
       unit=true journey=true images=true ;;

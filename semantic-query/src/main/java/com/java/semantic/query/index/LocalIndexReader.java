@@ -4,6 +4,7 @@ import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.index.IndexContract.*;
 import com.java.semantic.model.index.IndexFailure;
 import com.java.semantic.model.index.IndexManifest;
+import com.java.semantic.model.index.RelationContract;
 import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceReadContract.Page;
 import com.java.semantic.model.source.SourceReadContract.SemanticStatus;
@@ -43,7 +44,7 @@ public final class LocalIndexReader implements RepositoryIndexPort {
         long deadline = deadline();
         try {
             IndexManifest manifest = publications.select(source, Optional.empty(), deadline).manifest();
-            return new Discovery(SemanticStatus.READY, Optional.of(new IndexSummary(manifest.indexGeneration(), manifest.profile(), manifest.coverage())));
+            return new Discovery(SemanticStatus.READY, Optional.of(new IndexSummary(manifest.indexGeneration(), manifest.profile(), manifest.coverage(), IndexContract.capabilities(manifest.profile()))));
         } catch (IndexFailure failure) {
             return new Discovery(failure.code() == INDEX_NOT_PREPARED ? SemanticStatus.NOT_READY : SemanticStatus.UNAVAILABLE, Optional.empty());
         } catch (IOException | IllegalArgumentException failure) {
@@ -79,6 +80,37 @@ public final class LocalIndexReader implements RepositoryIndexPort {
                 List.of(request.candidateKinds().toString(), request.directory())), request.limit(), filter.toString(), parameters, "entries", Optional.empty(), EntryCandidate.class);
     }
 
+    @Override public RelationContract.Result findRelations(AdmittedSourceRevision source, RelationContract.Request request) {
+        long deadline = deadline();
+        if (!source.context().equals(request.context())) throw new IllegalArgumentException("context does not match source admission");
+        try {
+            IndexPublicationReader.Publication publication;
+            try { publication = publications.select(source, Optional.of(request.indexGeneration()), deadline); }
+            catch (IllegalArgumentException failure) { throw new IndexFailure(INDEX_UNAVAILABLE, failure); }
+            if (!IndexContract.supportsRelations(publication.manifest().profile())) throw new IndexFailure(INDEX_CAPABILITY_UNAVAILABLE);
+            publications.database(publication, deadline);
+            Class.forName("org.sqlite.JDBC");
+            RelationContract.Result result;
+            try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + publication.database().toUri().toASCIIString() + "?mode=ro&immutable=1");
+                    SourcePathResolver.InventoryLookup inventory = paths.openVerified(source, deadline)) {
+                ProgressHandler.setHandler(connection, 1000, new ProgressHandler() {
+                    @Override protected int progress() { return Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline ? 1 : 0; }
+                });
+                try {
+                    identity(connection, publication.manifest(), deadline);
+                    IndexRowValidator syntax = new IndexRowValidator(mapper, paths, source, inventory, connection, request.indexGeneration(), deadline);
+                    result = new LocalRelationReader(mapper).read(connection, publication.manifest(), syntax, request, deadline);
+                } finally { ProgressHandler.clearHandler(connection); }
+            }
+            check(deadline);
+            return result;
+        } catch (LinkageError failure) { throw IndexFailure.nativeUnavailable(failure); }
+        catch (SQLException | IOException | ClassNotFoundException failure) {
+            check(deadline);
+            throw new IndexFailure(INDEX_UNAVAILABLE, failure);
+        }
+    }
+
     @Override public FoldResult folds(AdmittedSourceRevision source, String path, Optional<String> generation) {
         SourcePathResolver.safeFile(path);
         generation.ifPresent(IndexContract::requireGeneration);
@@ -100,7 +132,7 @@ public final class LocalIndexReader implements RepositoryIndexPort {
                     identity(connection, manifest, deadline);
                     IndexRowValidator validator = new IndexRowValidator(mapper, paths, source, inventory, connection, manifest.indexGeneration(), deadline);
                     FileOutcome file = validator.file(path, true);
-                    boolean capable = manifest.profile().equals(IndexContract.currentProfile());
+                    boolean capable = IndexContract.supportsFolds(manifest.profile());
                     List<Fold> folds = new ArrayList<>();
                     if (capable) {
                         String sql = "SELECT f.symbol_id AS fold_id,f.path AS fold_path,f.kind AS fold_kind,f.start_byte AS fold_start,"
@@ -263,7 +295,7 @@ public final class LocalIndexReader implements RepositoryIndexPort {
     }
     private static <T> Result<T> result(IndexManifest manifest, List<T> items, boolean more, Optional<String> cursor, Optional<FileOutcome> file) {
         return new Result<>(manifest.context(), manifest.indexGeneration(), manifest.profile(), manifest.coverage(), AnalysisLevel.SYNTAX,
-                items, new Page(items.size(), more, cursor), file);
+                IndexContract.capabilities(manifest.profile()), items, new Page(items.size(), more, cursor), file);
     }
     private void identity(Connection connection, IndexManifest manifest, long deadline) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("SELECT singleton,repository_id,revision,generation,source_manifest_digest,inventory_digest,length(CAST(profile_json AS BLOB)) AS profile_bytes,CASE WHEN length(CAST(profile_json AS BLOB))<=65536 THEN profile_json ELSE NULL END AS profile_json FROM identity"); ResultSet row = statement.executeQuery()) {

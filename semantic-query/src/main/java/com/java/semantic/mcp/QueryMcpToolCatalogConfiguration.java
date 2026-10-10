@@ -106,7 +106,7 @@ public class QueryMcpToolCatalogConfiguration {
 
     private static boolean isIndexOperation(String operation) {
         return switch (operation) {
-            case "search_code", "get_outline", "list_entry_points" -> true;
+            case "search_code", "get_outline", "list_entry_points", "find_relations" -> true;
             default -> false;
         };
     }

@@ -6,6 +6,9 @@ import com.java.semantic.model.index.IndexContract.*;
 import com.java.semantic.model.index.IndexFailure;
 import com.java.semantic.model.index.IndexManifest;
 import com.java.semantic.model.index.IndexRepositoryState.Receipt;
+import com.java.semantic.model.index.RelationContract;
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -34,7 +37,7 @@ class SqliteIndexArtifactTest {
                 calls.incrementAndGet(); return IndexArtifactFixture.parse(generation, entry, bytes);
             });
             IndexManifest manifest = builder.build(input, fixture.stage(input), () -> { });
-            fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             Receipt receipt = fixture.indexes.publish(running, fixture.stage(input), manifest);
             assertThat(calls).hasValue(1);
@@ -73,12 +76,12 @@ class SqliteIndexArtifactTest {
             IndexBuildInput first = fixture.prepare("class A {}\n");
             SqliteIndexBuilder builder = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse);
             IndexManifest manifest = builder.build(first, fixture.stage(first), () -> { });
-            fixture.jobs.admit(first, IndexArtifactFixture.request(), Optional.empty());
+            fixture.admit(first, IndexArtifactFixture.request(), Optional.empty());
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             Receipt firstReceipt = fixture.indexes.publish(running, fixture.stage(first), manifest);
             fixture.jobs.complete(fixture.git.repository, new IndexJobId(running.jobId()), firstReceipt);
             IndexBuildInput rebuild = fixture.input(first.context());
-            fixture.jobs.admit(rebuild, IndexArtifactFixture.request(), Optional.of(first.generation()));
+            fixture.admit(rebuild, IndexArtifactFixture.request(), Optional.of(first.generation()));
             SemanticIndexJob rebuilding = fixture.jobs.claimNext().orElseThrow();
             assertThatThrownBy(() -> builder.build(rebuild, fixture.stage(rebuild), () -> { throw new IllegalStateException("capacity refusal"); }))
                     .isInstanceOf(IllegalStateException.class);
@@ -117,7 +120,7 @@ class SqliteIndexArtifactTest {
         try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
             IndexBuildInput input = fixture.prepare("class A {}\n");
             IndexManifest manifest = new SqliteIndexBuilder(fixture.mapper, IndexArtifactFixture::parse).build(input, fixture.stage(input), () -> { });
-            fixture.jobs.admit(input, IndexArtifactFixture.request(), Optional.of(java.util.UUID.randomUUID().toString()));
+            fixture.admit(input, IndexArtifactFixture.request(), Optional.of(java.util.UUID.randomUUID().toString()));
             SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
             assertThatThrownBy(() -> fixture.indexes.publish(running, fixture.stage(input), manifest)).isInstanceOf(IllegalStateException.class);
             assertThat(fixture.indexes.state(fixture.git.repository).revisions()).isEmpty();
@@ -234,6 +237,156 @@ class SqliteIndexArtifactTest {
                 assertThat(rows.next()).isFalse();
             }
         }
+    }
+
+    @Test
+    void actual_profile_three_build_seals_plan_coverage_and_source_edges_without_private_sidecars() throws Exception {
+        try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
+            fixture.properties.getRepositories().get("orders").getRelations().setEnabled(true);
+            fixture.properties.getRepositories().get("orders").getRelations().setSourceRoots(List.of(""));
+            IndexBuildInput input = fixture.prepare("class A { void first() { second(); } void second() {} }\n");
+            SemanticIndexJob accepted = fixture.admit(input, IndexArtifactFixture.request(), Optional.empty());
+            SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
+            IndexManifest manifest = new IndexBuildExecutor(fixture.mapper, fixture.inputs, new PlatformIdentity(), fixture.properties)
+                    .build(input, running, fixture.stage(input), () -> { });
+            assertThat(manifest.profile()).isEqualTo(IndexContract.relationsProfile());
+            assertThat(manifest.analysisPlanDigest()).isEqualTo(accepted.analysis().analysisPlanDigest());
+            try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + fixture.stage(input).resolve("index.sqlite"));
+                    Statement statement = connection.createStatement()) {
+                try (ResultSet rows = statement.executeQuery("SELECT analysis_plan_digest,provenance_json,coverage_json FROM relation_metadata")) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getString(1)).isEqualTo(manifest.analysisPlanDigest().orElseThrow());
+                    RelationContract.Provenance provenance = fixture.mapper.readValue(rows.getString(2), RelationContract.Provenance.class);
+                    assertThat(provenance.sourceRoots()).containsExactly("");
+                    assertThat(provenance.artifacts()).isEmpty();
+                    RelationContract.Coverage coverage = fixture.mapper.readValue(rows.getString(3), RelationContract.Coverage.class);
+                    assertThat(coverage.processedFiles()).isEqualTo(1);
+                    assertThat(coverage.callOccurrences()).isEqualTo(1);
+                    assertThat(coverage.resolvedCallOccurrences()).isEqualTo(1);
+                    assertThat(coverage.extractionComplete()).isTrue();
+                }
+                try (ResultSet rows = statement.executeQuery("SELECT relation_json,d.declaration_json FROM relations r JOIN declarations d ON d.symbol_id=r.target_symbol_id WHERE r.kind='CALL'")) {
+                    assertThat(rows.next()).isTrue();
+                    Declaration target = fixture.mapper.readValue(rows.getString(2), Declaration.class);
+                    assertThat(target.name()).isEqualTo("second");
+                    assertThat(rows.getString(1)).contains("STATIC_RESOLVED");
+                }
+                // Sealing validates the public projection, not merely SQLite FK consistency.
+                statement.executeUpdate("UPDATE relations SET start_byte=start_byte+1 WHERE kind='CALL'");
+                assertThatThrownBy(() -> SqliteRelationProjection.validate(connection, fixture.mapper,
+                        manifest.analysisPlanDigest().orElseThrow())).isInstanceOf(IOException.class);
+            }
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(fixture.stage(input))) {
+                assertThat(files).extracting(path -> path.getFileName().toString()).containsExactlyInAnyOrder("index.sqlite", "manifest.json");
+            }
+        }
+    }
+
+    @Test
+    void projection_counts_associations_but_deduplicates_shared_call_occurrence() throws Exception {
+        try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
+            String source = "class A { void first() { second(); } void second() {} }\n";
+            IndexBuildInput input = fixture.prepare(source);
+            new SqliteIndexBuilder(fixture.mapper, new JavaSyntaxExtractor()).build(input, fixture.stage(input), () -> { });
+            try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + fixture.stage(input).resolve("index.sqlite"));
+                    Statement statement = connection.createStatement()) {
+                connection.setAutoCommit(false);
+                Declaration first;
+                Declaration second;
+                try (ResultSet rows = statement.executeQuery("SELECT declaration_json FROM declarations WHERE name='first'")) {
+                    assertThat(rows.next()).isTrue();
+                    first = fixture.mapper.readValue(rows.getString(1), Declaration.class);
+                }
+                try (ResultSet rows = statement.executeQuery("SELECT declaration_json FROM declarations WHERE name='second'")) {
+                    assertThat(rows.next()).isTrue();
+                    second = fixture.mapper.readValue(rows.getString(1), Declaration.class);
+                }
+                int start = source.indexOf("second()");
+                RelationContract.SourceSite site = new RelationContract.SourceSite(first.path(), first.blobId(), first.contentDigest(),
+                        first.byteLength(), new SourceSpan(start, start + "second()".length(), 1, 1), Optional.of(first.symbolId()),
+                        new RelationContract.Scope(RelationContract.ScopeKind.METHOD, first.range()));
+                try (SqliteRelationProjection projection = new SqliteRelationProjection(connection, fixture.mapper, input, () -> { })) {
+                    for (Declaration endpoint : List.of(first, second)) {
+                        Optional<RelationContract.Target> target = Optional.of(new RelationContract.Target(RelationContract.TargetKind.SOURCE_SYMBOL,
+                                Optional.of(new RelationContract.SourceTarget(endpoint, Optional.of("A." + endpoint.name() + "()"))), Optional.empty()));
+                        projection.accept(new RelationContract.Fact(RelationContract.factIdentity(input.generation(), RelationContract.Kind.CALL, site, target),
+                                RelationContract.Kind.CALL, site, endpoint.equals(second) ? RelationContract.ResolutionState.STATIC_RESOLVED
+                                        : RelationContract.ResolutionState.CANDIDATE, target, Optional.empty(), Optional.empty()));
+                    }
+                    RelationContract.Coverage coverage = projection.coverage();
+                    assertThat(coverage.kindCounts()).containsEntry(RelationContract.Kind.CALL, 2L);
+                    assertThat(coverage.stateCounts()).containsEntry(RelationContract.ResolutionState.CANDIDATE, 1L)
+                            .containsEntry(RelationContract.ResolutionState.STATIC_RESOLVED, 1L);
+                    assertThat(coverage.callOccurrences()).isEqualTo(1);
+                    assertThat(coverage.resolvedCallOccurrences()).isEqualTo(1);
+                    try (ResultSet rows = statement.executeQuery("SELECT count(*) FROM relations")) {
+                        assertThat(rows.next()).isTrue();
+                        assertThat(rows.getInt(1)).isEqualTo(2);
+                    }
+                }
+                connection.rollback();
+            }
+        }
+    }
+
+    @Test
+    void real_sqlite_page_cap_refuses_rebuild_before_sealing_and_preserves_ready() throws Exception {
+        try (IndexArtifactFixture fixture = new IndexArtifactFixture(root)) {
+            String owner = "A".repeat(700);
+            StringBuilder source = new StringBuilder("class " + owner + " {");
+            for (int index = 0; index < 40_000; index++) source.append("void m").append(index).append("() {}");
+            source.append("}\n");
+            IndexBuildInput original = fixture.prepare(source.toString());
+            SqliteIndexBuilder baseline = new SqliteIndexBuilder(fixture.mapper, (generation, entry, bytes) -> {
+                Declaration type = largeOwnerDeclarations(generation, entry, bytes, owner, false).declarations().getFirst();
+                return new ParsedFile(new FileOutcome(entry.path(), true, ParseStatus.PARSED, bytes.length,
+                        entry.blobId(), entry.contentDigest(), List.of()), List.of(type), List.of(), List.of());
+            });
+            IndexManifest manifest = baseline.build(original, fixture.stage(original), () -> { });
+            fixture.admit(original, IndexArtifactFixture.request(), Optional.empty());
+            SemanticIndexJob running = fixture.jobs.claimNext().orElseThrow();
+            Receipt ready = fixture.indexes.publish(running, fixture.stage(original), manifest);
+            fixture.jobs.complete(fixture.git.repository, new IndexJobId(running.jobId()), ready);
+            IndexBuildInput rebuild = fixture.input(original.context());
+            fixture.admit(rebuild, IndexArtifactFixture.request(), Optional.of(original.generation()));
+            SemanticIndexJob rebuilding = fixture.jobs.claimNext().orElseThrow();
+            SqliteIndexBuilder capped = new SqliteIndexBuilder(fixture.mapper,
+                    (generation, entry, bytes) -> largeOwnerDeclarations(generation, entry, bytes, owner, true));
+            assertThatThrownBy(() -> capped.build(rebuild, fixture.stage(rebuild), () -> { }))
+                    .isInstanceOf(IndexFailure.class).hasRootCauseInstanceOf(java.sql.SQLException.class)
+                    .hasStackTraceContaining("SQLITE_FULL");
+            assertThat(Files.exists(fixture.stage(rebuild).resolve("manifest.json"))).isFalse();
+            assertThat(fixture.indexes.receipt(rebuilding)).isEmpty();
+            assertThat(fixture.indexes.selected(original.context())).contains(ready);
+            assertThat(Files.size(fixture.stage(rebuild).resolve("index.sqlite"))).isLessThanOrEqualTo(IndexContract.MAX_DATABASE_BYTES);
+            fixture.jobs.fail(fixture.git.repository, new IndexJobId(rebuilding.jobId()), "INDEX_UNAVAILABLE");
+        }
+    }
+
+    private static ParsedFile largeOwnerDeclarations(String generation, com.java.semantic.model.source.SourceInventoryEntry entry,
+            byte[] bytes, String owner, boolean includeMethods) {
+        String source = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        Declaration type = new Declaration(IndexContract.identity(generation, entry.path(), "CLASS", "6"), owner,
+                DeclarationKind.CLASS, "", Optional.empty(), entry.path(), entry.blobId().orElseThrow(),
+                entry.contentDigest().orElseThrow(), bytes.length, new SourceSpan(0, bytes.length - 1, 1, 1),
+                new SourceSpan(6, 6 + owner.length(), 1, 1), "class " + owner);
+        List<Declaration> declarations = new java.util.ArrayList<>();
+        declarations.add(type);
+        if (includeMethods) {
+            int position = source.indexOf("void ");
+            while (position >= 0) {
+                int nameStart = position + 5;
+                int nameEnd = source.indexOf('(', nameStart);
+                int end = source.indexOf('}', nameEnd) + 1;
+                declarations.add(new Declaration(IndexContract.identity(generation, entry.path(), "METHOD", Integer.toString(nameStart)),
+                        source.substring(nameStart, nameEnd), DeclarationKind.METHOD, owner, Optional.of(type.symbolId()),
+                        entry.path(), type.blobId(), type.contentDigest(), bytes.length, new SourceSpan(position, end, 1, 1),
+                        new SourceSpan(nameStart, nameEnd, 1, 1), source.substring(position, nameEnd + 2)));
+                position = source.indexOf("void ", end);
+            }
+        }
+        return new ParsedFile(new FileOutcome(entry.path(), true, ParseStatus.PARSED, bytes.length,
+                entry.blobId(), entry.contentDigest(), List.of()), declarations, List.of(), List.of());
     }
 
 }

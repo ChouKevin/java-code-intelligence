@@ -5,6 +5,10 @@ import com.java.semantic.indexer.index.IndexBuildInput;
 import com.java.semantic.indexer.index.IndexPublicationStore;
 import com.java.semantic.indexer.index.IndexSourceAccess;
 import com.java.semantic.indexer.index.SemanticIndexJob;
+import com.java.semantic.indexer.index.IndexAnalysisIntent;
+import com.java.semantic.indexer.index.ResolutionInputStore;
+import com.java.semantic.indexer.source.SourceCapacityGuard;
+import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.indexer.job.FileSourceJobStore;
 import com.java.semantic.indexer.job.IndexJobAlreadyActiveException;
 import com.java.semantic.indexer.job.IndexJobId;
@@ -35,16 +39,21 @@ public final class PreparationCoordinator {
     private final IndexSourceAccess sourceAccess;
     private final IndexPublicationStore publications;
     private final RepositoryRegistry repositories;
+    private final ResolutionInputStore inputs;
+    private final SourceCapacityGuard capacity;
 
     public PreparationCoordinator(FileSourceJobStore sources, FileSemanticIndexJobStore indexes,
             SourcePreparationService sourceService, IndexSourceAccess sourceAccess,
-            IndexPublicationStore publications, RepositoryRegistry repositories) {
+            IndexPublicationStore publications, RepositoryRegistry repositories, ResolutionInputStore inputs,
+            RepositoryProperties properties) {
         this.sources = sources;
         this.indexes = indexes;
         this.sourceService = sourceService;
         this.sourceAccess = sourceAccess;
         this.publications = publications;
         this.repositories = repositories;
+        this.inputs = inputs;
+        this.capacity = new SourceCapacityGuard(properties);
     }
 
     public SourcePreparationJob prepareSource(RepositoryId repository, PreparationRequestId request,
@@ -66,7 +75,15 @@ public final class PreparationCoordinator {
             }
             // Read selection metadata only: rebuilding an incompatible or corrupt artifact must remain possible.
             Optional<String> expected = Objects.isNull(previous) ? Optional.empty() : previous.selectedGeneration();
-            return indexes.admit(input, request, expected);
+            IndexJobId jobId = IndexJobId.create();
+            IndexAnalysisIntent analysis;
+            try {
+                analysis = inputs.freeze(input, jobId, request, repositories.require(repository).getRelations(), capacity::check);
+            } catch (RuntimeException failure) {
+                try { inputs.cleanupUnaccepted(jobId, request); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+                throw failure;
+            }
+            return indexes.admit(input, jobId, request, expected, analysis);
         }
     }
 
@@ -108,7 +125,7 @@ public final class PreparationCoordinator {
         synchronized (sources) {
             for (SourceRepositoryDescriptor descriptor : repositories.descriptors()) {
                 RepositoryId repository = new RepositoryId(descriptor.repositoryId());
-                if (sources.hasActive(repository) || indexes.hasActive(repository)) return;
+                if (sources.hasActive(repository) || indexes.hasActive(repository) || inputs.hasLiveWorker(repository)) return;
             }
             collection.run();
         }
@@ -121,7 +138,7 @@ public final class PreparationCoordinator {
         requireUnambiguous(source, index);
         if (source.isPresent()) throw new PreparationRequestReusedException(new IndexJobId(source.orElseThrow().jobId()), request);
         if (index.isPresent()) throw new PreparationRequestReusedException(new IndexJobId(index.orElseThrow().jobId()), request);
-        if (sources.hasActive(repository) || indexes.hasActive(repository)) throw new IndexJobAlreadyActiveException(repository);
+        if (sources.hasActive(repository) || indexes.hasActive(repository) || inputs.hasLiveWorker(repository)) throw new IndexJobAlreadyActiveException(repository);
     }
 
     private static void requireUnambiguous(Optional<SourcePreparationJob> source, Optional<SemanticIndexJob> index) {

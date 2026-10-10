@@ -1,6 +1,7 @@
 package com.java.semantic.mcp;
 
 import com.java.semantic.model.index.IndexContract;
+import com.java.semantic.model.index.RelationContract;
 import com.java.semantic.model.source.SourceReadContract;
 import com.java.semantic.model.source.SourceReadContract.EntryKind;
 import com.java.semantic.model.source.SourceReadContract.EntryStatus;
@@ -91,6 +92,7 @@ public final class SemanticMcpSchemaCatalog {
                     "cursor", field(text(), "Opaque cursor bound to exact context, generation, candidate kinds and directory; pass unchanged."),
                     "indexGeneration", field(generation(), "Optional canonical UUID pin for the published index generation.")),
                     List.of("context"), "List syntax-recognized entry candidates in one exact indexed revision; unknown properties are rejected.");
+            case "find_relations" -> relationInput();
             default -> throw new IllegalArgumentException("unknown query operation");
         };
     }
@@ -148,6 +150,7 @@ public final class SemanticMcpSchemaCatalog {
             case "search_code" -> indexResult(declaration(), false);
             case "get_outline" -> indexResult(declaration(), true);
             case "list_entry_points" -> indexResult(entryCandidate(), false);
+            case "find_relations" -> relationResult();
             default -> throw new IllegalArgumentException("unknown query operation");
         };
         return Map.of("oneOf", List.of(result, errorSchema()),
@@ -160,7 +163,7 @@ public final class SemanticMcpSchemaCatalog {
                         "INVALID_ARGUMENT", "REPOSITORY_NOT_FOUND", "SOURCE_NOT_PREPARED", "REVISION_NOT_PREPARED",
                         "SOURCE_NOT_FOUND", "SOURCE_UNSUPPORTED", "SOURCE_SUMMARY_UNAVAILABLE", "SOURCE_RESULT_TOO_LARGE", "SOURCE_BUSY", "SOURCE_UNAVAILABLE", "SOURCE_TIMEOUT",
                         "INDEX_NOT_PREPARED", "INDEX_NOT_CURRENT", "INDEX_UNAVAILABLE", "INDEX_INCOMPATIBLE", "INDEX_GENERATION_EXPIRED",
-                        "INDEX_RESULT_TOO_LARGE", "INDEX_BUSY", "INDEX_TIMEOUT")),
+                        "INDEX_RESULT_TOO_LARGE", "INDEX_BUSY", "INDEX_TIMEOUT", "INDEX_CAPABILITY_UNAVAILABLE", "INDEX_SYMBOL_NOT_FOUND")),
                         "Stable safe domain or request error code."),
                 "message", field(text(), "Fixed safe recovery advice; never contains raw exception text or echoed input."),
                 "reason", field(enums(SourceReadContract.SummaryOutcome.values(), "Safe summary-unavailability reason."),
@@ -173,12 +176,13 @@ public final class SemanticMcpSchemaCatalog {
                 "context", field(context(), "Exact source repository and revision for this result."),
                 "indexGeneration", field(generation(), "Immutable published index generation used for this result."),
                 "profile", field(profile(), "Parser/schema provenance for the indexed declarations."),
+                "capabilities", capabilities(),
                 "coverage", field(indexCoverage(), "Independent Java-file and declaration coverage; incomplete coverage is explicit."),
                 "analysisLevel", field(enums(IndexContract.AnalysisLevel.values(), "Analysis level."), "Always SYNTAX; no type resolution or runtime conclusion."),
                 "items", field(array(item), outline ? "Declarations in the requested file." : "Complete syntax result items in stable order."),
                 "page", field(page(), "Returned count and generation/filter-bound continuation state."),
                 "file", nullable(fileOutcome(), "Optional outline file outcome, including parse status and safe diagnostics; null for non-outline operations."));
-        return object(fields, List.of("context", "indexGeneration", "profile", "coverage", "analysisLevel", "items", "page"),
+        return object(fields, List.of("context", "indexGeneration", "profile", "capabilities", "coverage", "analysisLevel", "items", "page"),
                 "Bounded syntax-index result; source identity and index generation remain explicit.");
     }
 
@@ -292,14 +296,15 @@ public final class SemanticMcpSchemaCatalog {
         return object(properties(
                 "indexGeneration", field(generation(), "Selected immutable index generation."),
                 "profile", field(profile(), "Parser and schema profile."),
-                "coverage", field(indexCoverage(), "Java-file and declaration coverage.")),
-                List.of("indexGeneration", "profile", "coverage"), "Independent syntax-index discovery summary.");
+                "coverage", field(indexCoverage(), "Java-file and declaration coverage."),
+                "capabilities", capabilities()),
+                List.of("indexGeneration", "profile", "coverage", "capabilities"), "Independent index discovery summary.");
     }
 
     private static Map<String, Object> profile() {
         return object(properties(
-                "schemaVersion", field(integerValue(1, Integer.MAX_VALUE, "Positive index schema version."), "Index database schema version."),
-                "policyVersion", field(integerValue(1, Integer.MAX_VALUE, "Positive index policy version."), "Index policy version."),
+                "schemaVersion", field(Map.of("type", "integer", "enum", List.of(1, 2, 3)), "Known paired profiles: 1/1 syntax, 2/2 with folds, 3/3 with static Relations."),
+                "policyVersion", field(Map.of("type", "integer", "enum", List.of(1, 2, 3)), "Known paired profile policy version; sealed generations are not upgraded."),
                 "engine", field(text(), "Parser engine name."),
                 "version", field(text(), "Parser engine version."),
                 "languageLevel", field(text(), "Configured Java language level."),
@@ -384,6 +389,106 @@ public final class SemanticMcpSchemaCatalog {
                 "startLine", field(integerValue(1, Integer.MAX_VALUE, "One-based LF-counted source line."), "One-based inclusive start line, counted using LF; CRLF bytes are not normalized."),
                 "endLine", field(integerValue(1, Integer.MAX_VALUE, "One-based LF-counted source line."), "One-based inclusive end line, counted using LF; CRLF bytes are not normalized.")),
                 List.of("startByte", "endByte", "startLine", "endLine"), "Source evidence range: zero-based raw UTF-8 byte offsets [startByte,endByte), plus one-based inclusive LF lines.");
+    }
+    private static Map<String, Object> relationInput() {
+        Map<String, Object> schema = new LinkedHashMap<>(input(properties(
+                "context", context(), "indexGeneration", generation(), "anchor", relationAnchor(),
+                "direction", enums(RelationContract.Direction.values(), "Case-sensitive uppercase INCOMING or OUTGOING; lowercase is invalid."),
+                "relationKinds", array(enums(RelationContract.Kind.values(), "Absent or empty means all kinds; duplicates normalize.")),
+                "resolutionStates", array(enums(RelationContract.ResolutionState.values(), "Absent or empty means all states; duplicates normalize.")),
+                "directory", field(string(), "Filter occurrence paths, not target paths."),
+                "limit", integer(1, 100, 20, "Maximum whole facts."),
+                "cursor", field(text(), "Continuation bound to exact context, generation, anchor, direction, all filters and limit.")),
+                List.of("context", "indexGeneration", "anchor", "direction"),
+                "Exact-generation static evidence, not a runtime call graph."));
+        schema.put("allOf", List.of(anchorDirection("FILE", "OUTGOING"), anchorDirection("EXTERNAL_TARGET", "INCOMING")));
+        return Map.copyOf(schema);
+    }
+
+    private static Map<String, Object> anchorDirection(String kind, String direction) {
+        return Map.of("if", Map.of("properties", Map.of("anchor",
+                        Map.of("properties", Map.of("kind", Map.of("const", kind))))),
+                "then", Map.of("properties", Map.of("direction", Map.of("const", direction))));
+    }
+
+
+    private static Map<String, Object> capabilities() {
+        return object(properties("syntax", bool("Syntax navigation."), "folds", bool("Structural folds."),
+                "relations", bool("Static relation evidence.")), List.of("syntax", "folds", "relations"), "Profile capabilities.");
+    }
+
+    private static Map<String, Object> relationAnchor() {
+        return Map.of("oneOf", List.of(
+                object(properties("kind", Map.of("const", "SOURCE_SYMBOL"), "symbolId", sha256()), List.of("kind", "symbolId"), "Source symbol."),
+                object(properties("kind", Map.of("const", "EXTERNAL_TARGET"), "targetId", sha256()), List.of("kind", "targetId"), "External target."),
+                object(properties("kind", Map.of("const", "FILE"), "path", text()), List.of("kind", "path"), "File occurrences.")));
+    }
+
+    private static Map<String, Object> sourceSite() {
+        return object(properties("path", text(), "blobId", revision(), "contentDigest", sha256(), "byteLength", count("Source bytes."),
+                "range", sourceSpan(), "containerSymbolId", nullable(sha256(), "Navigation container, not runtime caller."),
+                "executionScope", object(properties("kind", enums(RelationContract.ScopeKind.values(), "Written execution scope."),
+                        "range", sourceSpan()), List.of("kind", "range"), "Original source execution scope.")),
+                List.of("path", "blobId", "contentDigest", "byteLength", "range", "executionScope"), "Raw occurrence provenance.");
+    }
+
+    private static Map<String, Object> externalTarget() {
+        return object(properties("targetId", sha256(), "artifactId", text(), "artifactDigest", sha256(), "module", nullable(text(), "Platform module."),
+                "declarationKind", enums(IndexContract.DeclarationKind.values(), "External declaration kind."),
+                "qualifiedOwner", text(), "name", text(), "signature", text()),
+                List.of("targetId", "artifactId", "artifactDigest", "declarationKind", "qualifiedOwner", "name", "signature"), "Generation-bound external declaration.");
+    }
+
+    private static Map<String, Object> relationFact() {
+        Map<String, Object> sourceTarget = object(properties("declaration", declaration(), "qualifiedSignature", nullable(text(), "Canonical static signature.")),
+                List.of("declaration"), "Written source endpoint.");
+        Map<String, Object> target = Map.of("oneOf", List.of(
+                object(properties("kind", Map.of("const", "SOURCE_SYMBOL"), "source", sourceTarget, "external", Map.of("type", "null")), List.of("kind", "source"), "Source target."),
+                object(properties("kind", Map.of("const", "EXTERNAL_TARGET"), "external", externalTarget(), "source", Map.of("type", "null")), List.of("kind", "external"), "External target.")));
+        Map<String, Object> framework = object(properties("recognizerId", text(), "spelling", text(), "recognitionBasis", text(),
+                "literalValues", Map.of("type", "object", "additionalProperties", array(unicodeString())),
+                "unresolvedMembers", array(text()), "bindingUncertainties", array(text()), "supportingEvidence", array(sourceSite())),
+                List.of("recognizerId", "spelling", "recognitionBasis", "literalValues", "unresolvedMembers", "bindingUncertainties", "supportingEvidence"), "Candidate framework interpretation.");
+        return object(properties("relationId", sha256(), "kind", enums(RelationContract.Kind.values(), "Static kind."), "source", sourceSite(),
+                "resolutionState", enums(RelationContract.ResolutionState.values(), "Static precision."), "target", nullable(target, "No target for unresolved facts."),
+                "unresolvedReason", nullable(enums(RelationContract.Reason.values(), "Safe reason."), "Unresolved reason."),
+                "framework", nullable(framework, "Framework candidate evidence.")), List.of("relationId", "kind", "source", "resolutionState"), "Whole static fact.");
+    }
+
+    private static Map<String, Object> relationCoverage() {
+        return object(properties("scopeFiles", count("Root-scope Java files."), "processedFiles", count("Analyzed files."),
+                "skippedFiles", count("Skipped files."), "outsideScopeJavaFiles", count("Java files outside roots."),
+                "fileCounts", enumCounts(RelationContract.FileStatus.values()), "kindCounts", enumCounts(RelationContract.Kind.values()),
+                "stateCounts", enumCounts(RelationContract.ResolutionState.values()), "reasonCounts", enumCounts(RelationContract.Reason.values()),
+                "callOccurrences", count("Distinct call occurrences, not associations."), "resolvedCallOccurrences", count("Statically resolved call occurrences."),
+                "extractionComplete", bool("Every scope file was processed.")),
+                List.of("scopeFiles", "processedFiles", "skippedFiles", "outsideScopeJavaFiles", "fileCounts", "kindCounts", "stateCounts", "reasonCounts", "callOccurrences", "resolvedCallOccurrences", "extractionComplete"), "Explicit partial static coverage.");
+    }
+
+    private static Map<String, Object> enumCounts(Enum<?>[] values) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (Enum<?> value : values) fields.put(value.name(), count("Fact or file count."));
+        return object(fields, List.of(), "Counts by known enum; absent means zero.");
+    }
+
+    private static Map<String, Object> resolutionProvenance() {
+        Map<String, Object> platform = object(properties("javaVersion", text(), "vendor", text(), "releaseDigest", sha256(), "modulesDigest", sha256()),
+                List.of("javaVersion", "vendor", "releaseDigest", "modulesDigest"), "Fixed Java platform identity.");
+        Map<String, Object> artifact = object(properties("id", text(), "digest", sha256(), "byteLength", count("Artifact bytes."), "order", count("Approved order.")),
+                List.of("id", "digest", "byteLength", "order"), "Approved artifact identity, no private paths.");
+        return object(properties("analysisPlanDigest", sha256(), "platform", platform, "sourceRoots", array(string()), "artifacts", array(artifact)),
+                List.of("analysisPlanDigest", "platform", "sourceRoots", "artifacts"), "Immutable approved resolution inputs.");
+    }
+
+    private static Map<String, Object> relationResult() {
+        return object(properties("context", context(), "indexGeneration", generation(), "profile", profile(), "capabilities", capabilities(),
+                "coverage", indexCoverage(), "relationCoverage", relationCoverage(), "resolutionProvenance", resolutionProvenance(),
+                "analysisLevel", Map.of("const", "STATIC"), "anchor", relationAnchor(), "direction", enums(RelationContract.Direction.values(), "Direction."),
+                "items", array(relationFact()), "page", page(),
+                "file", nullable(object(properties("file", fileOutcome(), "status", enums(RelationContract.FileStatus.values(), "Analysis outcome.")),
+                        List.of("file", "status"), "Explicit file analysis."), "Present for FILE anchor, even when empty.")),
+                List.of("context", "indexGeneration", "profile", "capabilities", "coverage", "relationCoverage", "resolutionProvenance", "analysisLevel", "anchor", "direction", "items", "page"),
+                "Static associations; empty results and partial coverage never prove no runtime callers.");
     }
 
     private static Map<String, Object> input(Map<String, Object> properties, List<String> required, String description) {
