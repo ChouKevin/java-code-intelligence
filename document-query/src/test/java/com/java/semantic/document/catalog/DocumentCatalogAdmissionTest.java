@@ -54,8 +54,8 @@ class DocumentCatalogAdmissionTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, STABLE, "repositories/sample/other.md", "# Other"));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper))) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 try (DocumentCatalog.ReadLease lease = catalog.open(deadline())) {
                     assertThat(lease.view().revisions().get(first).documents().get("repositories/sample/other.md").content()).isEqualTo("# Other");
                 }
@@ -71,8 +71,8 @@ class DocumentCatalogAdmissionTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, STABLE));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper))) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 Files.writeString(fixture.publication, " ".repeat(16_385));
                 rejected(catalog, first, Code.DOCUMENT_CAPACITY_EXCEEDED);
                 String[] revisions = new String[9];
@@ -111,8 +111,8 @@ class DocumentCatalogAdmissionTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, STABLE));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper))) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 String perDocument = fixture.commit(Map.of(DocumentFixture.GUIDE, "# Section\n".repeat(257)));
                 fixture.publish(perDocument, perDocument);
                 rejected(catalog, first, Code.DOCUMENT_CAPACITY_EXCEEDED);
@@ -130,8 +130,8 @@ class DocumentCatalogAdmissionTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, STABLE));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper))) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 Map<String, String> documents = new LinkedHashMap<>();
                 for (int index = 0; index < 128; index++) { documents.put("repositories/sample/doc" + index + ".md", "x".repeat(65_536)); }
                 String second = fixture.commit(documents);
@@ -147,8 +147,8 @@ class DocumentCatalogAdmissionTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, STABLE));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper))) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 byte[] content = STABLE.getBytes(StandardCharsets.UTF_8);
                 List<Consumer<Map<String, Object>>> mutations = List.of(
                         row -> row.put("unknown", true),
@@ -187,8 +187,8 @@ class DocumentCatalogAdmissionTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, STABLE));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper))) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 try (ObjectInserter inserter = fixture.git.getRepository().newObjectInserter()) {
                     byte[] catalogBytes = Files.readAllBytes(fixture.root.resolve("navigation-catalog.json"));
                     TreeFormatter sample = new TreeFormatter();
@@ -230,8 +230,8 @@ class DocumentCatalogAdmissionTest {
             String first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, content), List.of(row));
             fixture.publish(first, first);
             DocumentResultWriter writer = new DocumentResultWriter(fixture.mapper);
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.APPROVED), writer)) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.APPROVED), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.APPROVED).storage(), writer)) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.APPROVED).storage(), loader);
                 try (DocumentCatalog.ReadLease lease = catalog.open(deadline())) {
                     DocumentCatalog.Document document = lease.view().revisions().get(first).documents().get(DocumentFixture.GUIDE);
                     assertThat(document.readResult(lease.view().context(first), document.sections().getLast().section(), CollectionPurpose.APPROVED,

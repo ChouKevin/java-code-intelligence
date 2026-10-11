@@ -10,7 +10,7 @@ import com.java.semantic.document.application.DocumentContract.Section;
 import com.java.semantic.document.application.DocumentDeadline;
 import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.application.DocumentFailure.Code;
-import com.java.semantic.document.config.DocumentQueryProperties;
+import com.java.semantic.document.config.DocumentStorage;
 import com.java.semantic.model.source.SourceContext;
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,19 +19,15 @@ import java.nio.file.LinkOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import tools.jackson.databind.JsonNode;
 
 /** Complete immutable selection replacement; at most current plus one candidate full state. */
 public final class DocumentCatalog {
@@ -74,16 +70,15 @@ public final class DocumentCatalog {
         }
     }
     private record Observation(byte[] bytes, Optional<Code> failure) { }
-    private static final Set<String> SELECTION_FIELDS = Set.of("formatVersion", "documentRepositoryId", "activeRevision", "retainedRevisions");
-    private final DocumentQueryProperties properties;
-    private final GitDocumentLoader loader;
+    private final DocumentStorage properties;
+    private final DocumentSelectionLoader selectionLoader;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
     private CatalogView current;
     private byte[] acceptedSelection;
 
-    public DocumentCatalog(DocumentQueryProperties properties, GitDocumentLoader loader) {
+    public DocumentCatalog(DocumentStorage properties, GitDocumentLoader loader) {
         this.properties = properties;
-        this.loader = loader;
+        this.selectionLoader = new DocumentSelectionLoader(properties, loader);
         try (ReadLease initial = open(DocumentDeadline.after(DocumentContract.OPERATION_TIMEOUT))) {
             initial.view();
         }
@@ -117,7 +112,8 @@ public final class DocumentCatalog {
                 if (Objects.nonNull(current) && Arrays.equals(acceptedSelection, fresh.bytes())) {
                     selected = current;
                 } else {
-                    CatalogView candidate = loadSelection(fresh.bytes(), deadline);
+                    CatalogView candidate = selectionLoader.load(fresh.bytes(),
+                            Objects.isNull(current) ? Map.of() : current.revisions(), deadline);
                     Observation finalSelection = observe(deadline);
                     if (finalSelection.failure().isPresent() || !Arrays.equals(fresh.bytes(), finalSelection.bytes())) {
                         throw new DocumentFailure(Code.DOCUMENT_UNAVAILABLE);
@@ -165,46 +161,6 @@ public final class DocumentCatalog {
         }
     }
 
-    private CatalogView loadSelection(byte[] bytes, DocumentDeadline deadline) {
-        JsonNode selection = GitDocumentLoader.parseObject(bytes, SELECTION_FIELDS);
-        GitDocumentLoader.requireVersion(selection);
-        if (!GitDocumentLoader.text(selection, "documentRepositoryId").equals(properties.repositoryId())) {
-            throw new DocumentFailure(Code.DOCUMENT_CATALOG_INVALID);
-        }
-        String active = GitDocumentLoader.text(selection, "activeRevision");
-        JsonNode revisions = selection.path("retainedRevisions");
-        if (!revisions.isArray() || revisions.isEmpty()) { throw new DocumentFailure(Code.DOCUMENT_CATALOG_INVALID); }
-        if (revisions.size() > DocumentContract.MAX_REVISIONS) { throw new DocumentFailure(Code.DOCUMENT_CAPACITY_EXCEEDED); }
-        Set<String> requested = new HashSet<>();
-        for (JsonNode revision : revisions) {
-            if (!revision.isString()) { throw new DocumentFailure(Code.DOCUMENT_CATALOG_INVALID); }
-            String value = revision.stringValue();
-            try { new DocumentContext(properties.repositoryId(), value); }
-            catch (IllegalArgumentException exception) { throw new DocumentFailure(Code.DOCUMENT_CATALOG_INVALID); }
-            if (!requested.add(value)) { throw new DocumentFailure(Code.DOCUMENT_CATALOG_INVALID); }
-        }
-        if (!requested.contains(active)) { throw new DocumentFailure(Code.DOCUMENT_CATALOG_INVALID); }
-        Map<String, RevisionSnapshot> snapshots = new LinkedHashMap<>();
-        long totalBytes = 0;
-        int totalSections = 0;
-        for (String revision : requested) {
-            deadline.check();
-            RevisionSnapshot snapshot = Objects.isNull(current) ? null : current.revisions().get(revision);
-            if (Objects.isNull(snapshot)) {
-                snapshot = loader.load(revision, deadline, DocumentContract.MAX_TOTAL_BYTES - totalBytes,
-                        DocumentContract.MAX_TOTAL_SECTIONS - totalSections);
-            }
-            if (snapshot.markdownBytes() > DocumentContract.MAX_TOTAL_BYTES - totalBytes
-                    || snapshot.sectionCount() > DocumentContract.MAX_TOTAL_SECTIONS - totalSections) {
-                throw new DocumentFailure(Code.DOCUMENT_CAPACITY_EXCEEDED);
-            }
-            snapshots.put(revision, snapshot);
-            totalBytes += snapshot.markdownBytes();
-            totalSections += snapshot.sectionCount();
-        }
-        return new CatalogView(properties.repositoryId(), active, properties.collectionPurpose(), snapshots,
-                PublicationStatus.READY, Optional.empty());
-    }
 
     private static void acquire(Lock lock, DocumentDeadline deadline) {
         deadline.check();

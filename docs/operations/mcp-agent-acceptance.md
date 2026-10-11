@@ -90,8 +90,9 @@ their failures are not retroactively promoted under the recovery rubric.
    member-suite/pricing-service examples and generated drafts without per-draft
    human review; record that fixture scope, not APPROVED status. Source/citation
    audits still apply. See [fixture test authorization](repository-context-prompt.md#已授權的範例測試用途).
-   Central commit/push is not source preparation; unreviewed/failed refresh must
-   not replace the last formally approved document.
+   Central local commits/activation need no remote or push and are not source
+   preparation; unreviewed formal or failed refresh must not replace the last
+   formally approved document. Authorized TEST_ONLY drafts retain their status.
 3. Invoke fresh independent current and historical query clients explicitly with
    `gpt-6-luna`. Record client/version, selected model, full invocation and runtime
    provenance; do not infer provider-reported model identity. If unavailable,
@@ -247,7 +248,7 @@ target build, full graph completeness or actual deployed traffic is implied.
 
 ## Agent-operated onboarding acceptance
 
-Use [onboard-repository](../../skills/onboard-repository/SKILL.md) for the operator,
+Use [manage-repository](../../skills/manage-repository/SKILL.md) for the operator,
 not the description-only skill or Query client. A fresh operator receives approved
 origin/ID, disposable paths, existing executable services/artifact inputs and an
 explicit authorization envelope—not prewritten registration/dependency settings.
@@ -274,6 +275,34 @@ Relations without external dependencies uses representative source/JDK facts;
 that exception cannot satisfy the external-dependency fixture gate or hide missing
 required dependencies. Maven/Gradle effective-model resolution, private artifact
 downloads, unsupported JAR layouts and large projects require their own evidence.
+
+### Scoped local repository operation acceptance
+
+Before changing management guidance, record fresh-context routing/application
+choices for source-only add, default refresh, exact historical prepare, description
+only, local TEST_ONLY documents without a remote, and optional Relations.
+Characterize compliant existing routes; report actual gaps, not artificial RED.
+After editing, run equivalent fresh-context scenarios. Written prompts, link/name
+checks and text-only routing assessments do not establish runtime acceptance.
+
+The local-document operator receives approved disposable normal Git/selection
+paths, explicit write/activation authority, actual Markdown inputs and exact
+fixture source identities—not prepared catalog JSON, an expected tool sequence
+or oracle answer. It must use the packaged local update path, preserve unrelated
+dirty bytes, keep TEST_ONLY/DRAFT/NOT_VERIFIED and verify actual Document MCP
+identity. No remote/push, hand-authored catalog, source prepare or service restart
+may be invented. Source-only/description-only/read-only scenarios must not acquire
+index/admin/file-write scope beyond their explicit authorization.
+
+After CLI integration, a separate client explicitly selects `gpt-6-luna` and has
+only Document MCP plus Source Query MCP read tools. It reads operator-produced
+documents and independently pins/verifies source through both MCPs; no local
+source, author trace/output oracle, catalog-writing or management tool. Preserve
+client/version/model/invocation, full tool trace, unedited answer, exact citations
+and failures. Unavailable Luna is a blocker, not permission to switch models.
+Resource claims use observed owned runs only; fixture authorization establishes
+neither production capacity nor real business-document approval.
+
 
 ### Onboarding observed evidence — 2026-10-10
 

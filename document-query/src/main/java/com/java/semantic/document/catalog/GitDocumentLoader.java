@@ -9,7 +9,7 @@ import com.java.semantic.document.application.DocumentContract.Section;
 import com.java.semantic.document.application.DocumentDeadline;
 import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.application.DocumentFailure.Code;
-import com.java.semantic.document.config.DocumentQueryProperties;
+import com.java.semantic.document.config.DocumentStorage;
 import com.java.semantic.document.mcp.DocumentResultWriter;
 import com.java.semantic.model.source.SourceContext;
 import java.io.IOException;
@@ -56,11 +56,11 @@ public final class GitDocumentLoader implements AutoCloseable {
                     .maxStringLength(DocumentContract.MAX_CATALOG_BYTES).build())
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build())
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
-    private final DocumentQueryProperties properties;
+    private final DocumentStorage properties;
     private final DocumentResultWriter writer;
     private final Repository repository;
 
-    public GitDocumentLoader(DocumentQueryProperties properties, DocumentResultWriter writer) {
+    public GitDocumentLoader(DocumentStorage properties, DocumentResultWriter writer) {
         this.properties = properties;
         this.writer = writer;
         rejectSymlinkPath(properties.gitDirectory());

@@ -30,11 +30,11 @@ public class DocumentMcpConfiguration {
     DocumentResultWriter documentResultWriter(JsonMapper mapper) { return new DocumentResultWriter(mapper); }
     @Bean(destroyMethod = "close")
     GitDocumentLoader documentLoader(DocumentQueryProperties properties, DocumentResultWriter writer) {
-        return new GitDocumentLoader(properties, writer);
+        return new GitDocumentLoader(properties.storage(), writer);
     }
     @Bean
     DocumentCatalog documentCatalog(DocumentQueryProperties properties, GitDocumentLoader loader) {
-        return new DocumentCatalog(properties, loader);
+        return new DocumentCatalog(properties.storage(), loader);
     }
     @Bean
     DocumentCursorCodec documentCursors(JsonMapper mapper) { return new DocumentCursorCodec(mapper); }

@@ -1,6 +1,6 @@
 # Document MCP operations
 
-`document-query` serves pregenerated navigation from one operator-managed central Git repository. It is independent of Source Query and Indexer. It reads exact Git objects plus an external publication selection; it never fetches, checks out, builds target projects, runs an LLM, prepares source/indexes, publishes documents or deletes Git objects. Elasticsearch, arbitrary historical document search and a publisher API are not provided.
+The `document-query` read-only server serves pregenerated navigation from one operator-managed central Git repository. It is independent of Source Query and Indexer. It reads exact Git objects plus an external publication selection; it never fetches, checks out, builds target projects, runs an LLM, prepares source/indexes, publishes documents or deletes Git objects. The same executable offers a separate, explicitly invoked offline local-Git command described below. Elasticsearch, arbitrary historical document search and a publisher API are not provided.
 
 Navigation is always `NOT_VERIFIED`. Document provenance, operator approval and source readiness are different facts. Business conclusions still require exact-revision Source Query evidence. Read the [query skill](../../skills/query-business-code/SKILL.md) and [central author handoff](repository-context-prompt.md#central-document-handoff).
 
@@ -45,6 +45,79 @@ java -Xms64m -Xmx256m -XX:ActiveProcessorCount=2 \
 ```
 
 These heaps are bounded verification examples, not a production capacity guarantee. Check host/backing-host headroom before local verification; see [testing](testing.md). Missing/invalid configuration or invalid initial publication fails startup. There is no empty-success fallback.
+
+## Local Git document commands
+
+Use [manage-repository](../../skills/manage-repository/SKILL.md) to route source,
+index, drafting and document-update operations. Document updates need no business
+repo preparation, remote, network access or Query token. The CLI exits before
+Spring/web startup; the MCP server remains read-only.
+
+For this command, initialize an ordinary local Git repository with `git init -b main`
+and configure its **local** `user.name` and `user.email`. No remote is allowed.
+Set `DOCUMENT_GIT_DIRECTORY` to its absolute `.git` directory, not its worktree.
+The read-only server also supports bare repositories; the writer does not.
+Export these four settings explicitly:
+
+```bash
+export DOCUMENT_REPOSITORY_ID=local-guides
+export DOCUMENT_GIT_DIRECTORY=/absolute/owned/local-guides/.git
+export DOCUMENT_PUBLICATION_FILE=/absolute/owned/publication.json
+export DOCUMENT_COLLECTION_PURPOSE=TEST_ONLY
+```
+
+Initial generated files are owner-only (0600). Before a separate-UID reader uses
+the namespace, the operator must provision its authorized read/traverse access
+to Git objects, directories and selection. Replacement preserves existing owner,
+group and POSIX mode, plus ACLs where the JDK exposes `AclFileAttributeView`; failure
+to reproduce supported attributes refuses replacement. On Linux, use POSIX
+owner/group/mode for this CLI's reader-access policy: standard JDK providers do
+not expose extended POSIX ACLs, so **ACL-only reader namespaces are unsupported**.
+The command neither grants public access nor verifies another service UID.
+
+Use `APPROVED` only with the separately approved exact document content and source
+identities. TEST_ONLY fixtures do not acquire production approval. Place Markdown
+directly in `repositories/<sourceRepositoryId>/` in the document worktree.
+`--file` is a filename in that directory, not an arbitrary path.
+
+```bash
+java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local --help
+java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local \
+  update --source "example@${FULL_SOURCE_SHA}" --file description.md --file guide.md
+java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local status
+java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local \
+  activate --revision "${FULL_DOCUMENT_SHA}"
+```
+
+`update` accepts repeated `--related <repositoryId>@<fullSourceSha>` and
+`--withdraw <fullDocumentSha>`, plus one `--review-reference <text>`; APPROVED
+updates require that reference. `activate` also accepts repeated `--withdraw`.
+Source and document SHAs are separate full lowercase 40-character identities.
+`--help` needs no configuration; `status` does not create a publication.
+
+The command generates `navigation-catalog.json`, validates the complete retained
+selection with the reader's admission rules, commits raw named files and catalog,
+then atomically replaces the external selection. It refuses any pre-existing staged
+changes or manual catalog edits. Unrelated tracked/untracked working files and
+unselected committed catalog entries remain untouched. Hooks, clean filters,
+checkout/reset/clean and Git GC do not run. An unchanged update reuses its commit.
+
+At most eight revisions may be retained. A ninth refuses unless explicit
+`--withdraw` choices make room; there is no automatic eviction. Withdrawal changes
+reader membership, not Git history. Activating an older retained commit does not
+move the Git branch. Keep retained objects protected from unrelated external GC.
+
+Success emits one JSON result with `serviceVerified:false`: it proves local state,
+not what a running MCP instance has loaded. Verify through actual `search_documents`
+and `read_document`, checking document SHA, source contexts and publication status.
+Exit codes are 0 success, 2 invalid/admission refusal, 3 busy/concurrent change,
+4 I/O failure. Errors include a phase and, when available, the candidate SHA.
+If commit succeeds but activation fails, old selection remains; inspect `status`
+and explicitly `activate --revision <candidate>` after resolving the reported cause.
+Do not reset other edits or automatically repeat an uncertain update. A writer
+lock left by a killed process requires proving that no writer is alive before
+operator-authorized removal; do not delete another process's lock.
+
 
 ## Central Git catalog
 
@@ -104,12 +177,12 @@ Illustrative external selection, with unrelated example document hashes:
 Both actual retained commits must exist and validate. The example source SHA
 `aaaa…` is not either document SHA and does not become source current.
 
-An authorized operator performs publication:
+The local command performs the publication protocol; users need not hand-edit JSON:
 
-1. Make complete Git objects and reviewed catalog bytes available in the managed object store.
-2. Write a complete new selection to a sibling temporary file on the same filesystem.
-3. Atomically replace the configured selection file. Do not modify it in place while serving.
-4. Verify the actual returned document identity and `publicationStatus`; updating the file alone is not acceptance.
+1. Make validated Git objects and generated catalog bytes available.
+2. Write the complete admitted selection to a sibling temporary file.
+3. Atomically replace the configured selection on the same filesystem.
+4. Verify actual MCP identity and `publicationStatus`; local replacement alone is not service acceptance.
 
 The service observes the bounded selection on each operation. Unchanged accepted bytes reuse immutable snapshots. Changed selection acquires a fair exclusive catalog lock, waits for all old read leases to drain, re-observes the selection, builds/reuses every selected revision, and rechecks the exact selection bytes before activation. Readers hold leases through synchronous bounded result materialization. The writer downgrades its lock into a read lease without an activation gap. At most current plus one candidate full state are constructed; a third publication waits, rather than retaining arbitrarily many leased states. Closed leases drop their whole-state references.
 
@@ -176,7 +249,7 @@ An oversized candidate's full contextual read is an admission-capacity refusal: 
 
 ## Verification and evidence
 
-Use `bash scripts/test-document-mcp.sh` for the packaged native journey after resource admission. It snapshots the new executable into an exclusively owned temporary root, exercises real HTTP/MCP and exact Git blobs, reaps owned child processes, removes private test storage/logs and retains sanitized acceptance. It does not authorize images, existing-service restarts or project commits.
+Use `bash scripts/test-document-mcp.sh` for both packaged native journeys after resource admission. They snapshot the executable into an exclusively owned temporary root, exercise real CLI/HTTP/MCP and exact Git blobs, including update, old-pin continuation, rollback and explicit withdrawal, reap owned child processes, remove private test storage/logs and retain sanitized acceptance. They do not authorize images, existing-service restarts or project commits.
 Interrupted teardown still completes graceful/forced termination and restores owner interruption only after reaping. A running-ownership marker is cleared only after actual child exit; if termination remains unconfirmed, the launcher retains the private work root instead of deleting underneath a possibly live process.
 
 External acceptance explicitly selects `gpt-6-luna`, gives the agent only Document MCP and Source Query MCP, and records the client/version/invocation, complete tool trace and source-grounded answer. Scenarios cover current and historical source contexts, thin/no-hit document guidance and document replacement. Do not preload document bodies or author traces, rewrite the agent answer, or substitute local reads/preparation calls for MCP evidence. Native and agent results are separate evidence in [testing](testing.md) and the [agent checklist](mcp-agent-acceptance.md).

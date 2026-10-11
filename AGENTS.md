@@ -119,23 +119,26 @@ its own token, schemas and lifecycle; see [Document MCP operations](docs/operati
   timeout or overflow. Exact limits and recovery rules are in
   [Source MCP operations](docs/operations/source-mcp.md).
 
-## Repository onboarding skill
+## Repository management skill
 
-When asked to register/onboard a repository, prepare its dependencies/source/index,
-or enable JavaParser/Relations, read
-[onboard-repository](skills/onboard-repository/SKILL.md). It separates operator
-authorization, exact-source dependency preparation and Query-only acceptance;
-the skill itself grants no mutation, download or service-restart authority.
+When asked to register a repo, refresh default source, prepare an exact historical
+SHA, enable Java syntax/Relations, or update/activate/inspect local Git documents,
+read [manage-repository](skills/manage-repository/SKILL.md). Operations stay separate;
+the skill grants no mutation, download, service-restart or file-write authority.
+Query clients remain read-only.
 
 For authoring or refreshing descriptions, module inventories or relationship guides,
 including onboarding drafts, read [describe-repository](skills/describe-repository/SKILL.md).
 Use the [module-aware guide template](docs/operations/repository-context-prompt.md#module-aware-guide-mvp)
 for fuller repo guides, distinct from short discovery metadata. Authors may read
 approved exact local Git blobs; whole-project scope is not exhaustive analysis.
-Keep real drafts local. The centralized workflow hands reviewed documents to a
-separate Git document repository, with explicit approval for each update and
-separate publication authority; it never requires business-repo commits or prepare.
-Future Elasticsearch/external document MCP is separate from this codebase service.
+Keep real drafts local. Authorized local document updates go through
+manage-repository in an independent local Git document repo, without remote,
+credentials, push, business-repo commits or source prepare. Formal APPROVED
+collections require exact-content human review and separate activation authority;
+authorized TEST_ONLY fixtures retain DRAFT/NOT_VERIFIED without per-draft review.
+CLI/local status is not proof that running Document MCP adopted a revision.
+Future Elasticsearch remains separate.
 
 For read-only questions about module responsibilities, build dependencies, business
 rules, calculations, eligibility, features or service implementations, read

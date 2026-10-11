@@ -1,6 +1,6 @@
 ---
 name: describe-repository
-description: Use when drafting or refreshing a repository business description and navigation keywords, including the description step of onboarding, or explicitly authoring/updating a module inventory or relationship guide. For registration and index setup use onboard-repository; for read-only implementation, module, dependency or service-flow questions use query-business-code.
+description: Use when drafting or refreshing a repository business description, navigation keywords, module inventory or relationship guide, including a new repository's draft handoff.
 ---
 
 # 新增 repo：撰寫描述與查詢關鍵詞
@@ -9,7 +9,7 @@ description: Use when drafting or refreshing a repository business description a
 
 ## 入口與必要輸入
 
-Use this skill for repository descriptions and navigation keywords, or for explicitly authoring/updating module inventories or relationship guides. For registration, dependency preparation or JavaParser/index enablement, first use [onboard-repository](../onboard-repository/SKILL.md), then return here for the description step. Read-only questions about business implementation, modules, build dependencies or service flows belong to [query-business-code](../query-business-code/SKILL.md); do not create a guide unless asked to author or update one.
+Use this skill only for authoring/updating descriptions or guides. Registration, source/index preparation and authorized local document update/activation belong to [manage-repository](../manage-repository/SKILL.md). Read-only implementation, module, dependency or service-flow questions belong to [query-business-code](../query-business-code/SKILL.md); do not create a guide unless asked.
 
 先從已授權的對話與工具取得：
 - `repositoryId`、顯示名稱、允許讀取的路徑範圍。
@@ -62,9 +62,9 @@ onboarding 包含此草稿交接時，依[外部 guide prompt 的固定模板](.
 
 ## 人工審閱與發布交接
 
-- 中央文件草稿每次建立或更新都保持 `DRAFT`／`NOT_VERIFIED`。交付人工審閱時，提供完整候選內容、主 repo 與跨 repo 證據各自的完整 analyzedRevision、已讀／未讀範圍、差異及受影響的關係引用；人工必須審閱該次更新的確切內容與版本，內容再有任何變更就須重新審閱。不能沿用先前草稿的核准。人工審閱不把 trust 升為 `VERIFIED`，Author 不得自行標為 `APPROVED`。
-- 交接時分開報告來源分析版本／coverage、草稿位置與 `DRAFT`／`NOT_VERIFIED` 狀態、人工審閱是否 pending，以及中央文件是否已獲准／發布。尚未審閱時明示 `UNAPPROVED`；沒有獨立發布授權或尚未完成中央 Git 交付時明示 `UNPUBLISHED`。不得以草稿已寫入本機或人工已審閱，暗示它已發布。
-- 草稿生成或比對不修改既有中央核准文件。只有確切內容及 analyzedRevision 經人工核准，且另有明確授權，才可由負責者寫入、commit 或 push 至核准中央 Git checkout；記錄交付後的中央文件 revision，勿把文件自身 commit hash 寫進文件。文件 revision 與業務 source SHA 是不同身分。中央文件流程不要求業務 repo commit 或 `prepare_source`。
+- 中央文件草稿每次建立或更新都保持 `DRAFT`／`NOT_VERIFIED`。交付完整候選內容、主 repo 與跨 repo 各自的完整 analyzedRevision、已讀／未讀範圍、差異及受影響引用。正式 APPROVED collection 須人工審閱該次確切內容與版本；變更後重新審閱，不能沿用先前核准或由 Author 自行標 APPROVED。人工審閱不把 trust 升為 VERIFIED。
+- [已授權範例測試](../../docs/operations/repository-context-prompt.md#已授權的範例測試用途)可直接使用 TEST_ONLY/DRAFT，不必逐份人工審閱；仍核對 exact source、引用及支持度，不冒稱正式核准。分報草稿／coverage、審閱 pending 或 TEST_ONLY exception、local commit/activation 與實際 MCP 驗證；本機存稿或人工審閱不等於發布，未啟用明示 UNPUBLISHED。
+- 草稿生成或比對不覆寫中央文件或使用者編輯。獲具名寫入／啟用授權後交由 [manage-repository](../manage-repository/SKILL.md) 在核准 local Git 文件庫更新具名 Markdown；附 exact primary/related contexts 及真實 review-reference（正式核准時）。工具產生 catalog/digests/local commit/selection，作者不填 JSON、不嵌自身文件 hash。文件 commit 與 source SHA 各自獨立；不需 remote、URL、credentials、push、業務 repo commit 或 prepare_source。CLI 結果仍需另核對 running Document MCP。
 - 每 repo 僅在明確要求時重產；更新失敗或仍待審閱時，保留上一版中央核准文件。跨 repo 變更只列出可能受影響的引用，不自動重產所有 repo 文件。
 - 中央文件流程與既有短版 discovery `navigation-hint` 分開。若另行選擇更新短版 hint，仍須人工核准該摘要、keywords 與 analyzedRevision 的確切內容，並另行授權修改外部設定；未獲授權只交付短版草稿。
 - 草稿與 runtime 分離：建立、修改或儲存 `.local` 草稿都不會改變 MCP 目錄。不得自動解析 Markdown、匯入設定、註冊 repository、prepare/fetch source、發布或重啟服務。

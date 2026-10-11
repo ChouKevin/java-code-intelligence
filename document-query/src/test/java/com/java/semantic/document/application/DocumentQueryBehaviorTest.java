@@ -284,8 +284,8 @@ class DocumentQueryBehaviorTest {
         private QueryFixture(DocumentFixture fixture, DocumentOperationGate operations) {
             DocumentQueryProperties properties = fixture.properties(CollectionPurpose.TEST_ONLY);
             this.writer = new DocumentResultWriter(fixture.mapper);
-            this.loader = new GitDocumentLoader(properties, writer);
-            this.catalog = new DocumentCatalog(properties, loader);
+            this.loader = new GitDocumentLoader(properties.storage(), writer);
+            this.catalog = new DocumentCatalog(properties.storage(), loader);
             this.service = new DocumentQueryService(catalog, new DocumentCursorCodec(fixture.mapper), operations);
         }
 

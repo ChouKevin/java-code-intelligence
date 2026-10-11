@@ -46,9 +46,12 @@ must be separate and absolute; do not put index inside source/private storage.
 An absent default index root is normal source-only operation, not a reason to
 mount private Indexer storage into Query.
 
-For an agent-operated end-to-end flow, load
-[onboard-repository](../../skills/onboard-repository/SKILL.md); its explicit
-authorization and dependency-preparation steps do not grant service mutation.
+For authorized registration, default-source refresh, exact historical preparation
+or optional Java analysis, load
+[manage-repository](../../skills/manage-repository/SKILL.md). These are separate
+operations, not an automatic pipeline; the skill grants no service mutation.
+Local document update/activation uses its independent local Git route, not source
+prepare, business-repo commits or remote/push prerequisites.
 
 For onboarding, use separate external configuration files (paths are examples,
 not loaded automatically). A synthetic registration on Indexer:

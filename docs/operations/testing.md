@@ -990,3 +990,52 @@ copy; there is no document image.
 ## Release checks and boundaries
 
 Before deployment check explicit repository allowlist/secret separation, private admin TLS ingress, public format-1/policy-2 fresh namespaces, stable read locks and same-filesystem atomic publication. Verify direct-child pagination/cursors, UTF-8/CRLF/long-line read continuation, bounded literal rg, unsupported/excluded paths, guide hint status, A/B exact reads and failure-preserves-A. Verify retirement/republication boundaries, busy-read skip, pending-delete recovery, disabled GC, stale-context denial and retained current bytes. Query must remain readable on a published revision after Indexer stops; an orphan directory or registered-but-unprepared repo is **not** an admissible source. Verify the actual client against both `/mcp` endpoints independently. Neither a skipped test nor an HTTP-only response proves MCP/model acceptance. See [Source MCP operations](source-mcp.md) for startup, original-request recovery and rollback.
+
+## Local repository operations evidence — 2026-10-11
+
+This work adds an offline local-document CLI and consolidates repository skills;
+it does not change the read-only MCP tool schema. Private execution records are
+under `.superpowers/sdd/2026-10-11-local-repository-operations/`.
+
+- Existing document behavior: 35 ordinary tests passed before and after the shared
+  storage/admission extraction.
+- Full reactor before review corrections: 365 ordinary tests passed. The final
+  affected document suite ran 54 tests: 53 passed, zero failures, one skipped
+  because this Linux filesystem exposes no JDK ACL view. Unchanged Source/model
+  code accounts for the other 320 tests; no fresh full-reactor total is invented.
+- Review regressions reproduced and corrected actual raw Git filename loss,
+  selection mode loss (0640→0600), executable-catalog refusal and clean-filter
+  execution. Raw paths, index flags and supported reader-access attributes survive.
+- Packaged native proof: three scenarios passed with zero skips. Real CLI/MCP
+  exercised retained reads/continuation, rollback without moving HEAD, refusal,
+  withdrawal and commit-success/selection-failure recovery through status/activate.
+  The POSIX permission fault ran as an unprivileged user; a privileged runner
+  cannot establish that scenario by bypassing filesystem permissions.
+- Six explicit `gpt-6-luna` baseline/updated-skill scenarios are text-only routing
+  evidence, not executed operator or MCP acceptance.
+
+Fresh operator execution used Codex CLI 0.162.1 with explicit `gpt-6-luna`.
+It recovered from an absent installed-skill path and an initially wrong sentinel
+path before the update, then committed only the named guide/generated catalog,
+preserved unrelated bytes and accurately reported `serviceVerified:false`.
+The original failed commands remain in the trace; this is not a clean first pass.
+
+An independent read-only `gpt-6-luna` client made nine calls using only Document
+and Source Query MCP, with shell/web/other-agent tools disabled. It read the
+operator-produced document commit `fec0628dbe98011a5177f98bcde2e07ea057ed23`,
+completed the unfiltered one-repository catalog, resolved
+`local-vip-example@f383796ab0c4b1203f7aadb4e13854dfd87eb6c1`, and read
+`src/main/java/example/VipPolicy.java`, including an explicit raw L4–L14 recheck.
+Its unmodified answer cites that exact source for suspension precedence and
+point thresholds. Indexer prepared the real source and was stopped/reaped before
+the client; both Query services were reaped afterward. No document/source bodies
+or author trace were preloaded into the query prompt.
+
+Independent acceptance review: operator PASS_WITH_RECOVERY, dual-MCP query PASS,
+with no findings; this narrow run does not newly test final-answer document-locator
+formatting or historical/Relations agent behavior. Conservative Source/Relations
+native gate: two scenarios passed, zero skips. Whole-branch final review is closed
+with no actionable findings; root accepted the local milestone. Earlier results remain
+historical. No images, CI, production publication or project Git integration are claimed.
+Supported-ACL execution and separate-UID reader deployment were not exercised;
+Linux extended-POSIX-ACL-only namespaces are not supported by the local command.

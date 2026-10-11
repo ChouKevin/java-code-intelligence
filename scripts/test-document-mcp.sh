@@ -40,8 +40,8 @@ if [[ ! -f "$jar" ]]; then
 fi
 cp -- "$jar" "$run_root/work/runtime/document-query.jar"
 "$maven" "${maven_args[@]}" -pl document-query -am -Pdeployed-it \
-  -Dtest=DocumentMcpJourneyIT -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dtest=DocumentMcpJourneyIT,DocumentLocalPublicationJourneyIT -Dsurefire.failIfNoSpecifiedTests=false \
   -Ddocument.journey.root="$run_root" \
   -Ddocument.journey.jar="$run_root/work/runtime/document-query.jar" test
-echo 'Native document MCP journey completed: stateless tools, authentication, exact Git bytes, retained pagination/read, failed-update preservation, withdrawal and restart.'
+echo 'Native document MCP journeys completed: reader isolation, real local CLI publication, pinned pagination/read, rollback, withdrawal and restart.'
 echo 'This is packaged-process proof, not external-agent acceptance; GPT 6 Luna requires a separate recorded dual-MCP run.'

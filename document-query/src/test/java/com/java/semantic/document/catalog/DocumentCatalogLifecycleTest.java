@@ -38,9 +38,9 @@ class DocumentCatalogLifecycleTest {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, "# A\nfirst"));
             fixture.publish(first, first);
-            try (GitDocumentLoader loader = spy(new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), new DocumentResultWriter(fixture.mapper)));
+            try (GitDocumentLoader loader = spy(new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper)));
                     ExecutorService executor = Executors.newFixedThreadPool(2)) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 String second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# B\nsecond"));
                 String third = fixture.commit(Map.of(DocumentFixture.GUIDE, "# C\nthird"));
                 CountDownLatch secondRequested = new CountDownLatch(1);
@@ -93,8 +93,8 @@ class DocumentCatalogLifecycleTest {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, "# A\nfirst"));
             fixture.publish(first, first);
             DocumentResultWriter writer = spy(new DocumentResultWriter(fixture.mapper));
-            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY), writer)) {
-                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader);
+            try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), writer)) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
                 String second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# B\n# C\n# D\n"));
                 DocumentClockFixture clock = new DocumentClockFixture();
                 doAnswer(invocation -> {
@@ -111,7 +111,7 @@ class DocumentCatalogLifecycleTest {
                     assertThat(lease.view().publicationStatus()).isEqualTo(PublicationStatus.UPDATE_REJECTED);
                     assertThat(lease.view().revisions().get(first).documents().get(DocumentFixture.GUIDE).content()).isEqualTo("# A\nfirst");
                 }
-                assertThatThrownBy(() -> new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY), loader))
+                assertThatThrownBy(() -> new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader))
                         .isInstanceOfSatisfying(DocumentFailure.class,
                                 failure -> assertThat(failure.code()).isEqualTo(Code.DOCUMENT_CATALOG_INVALID));
             }

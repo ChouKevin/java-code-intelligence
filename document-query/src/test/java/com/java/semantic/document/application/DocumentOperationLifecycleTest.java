@@ -37,9 +37,9 @@ class DocumentOperationLifecycleTest {
             fixture.publish(firstRevision, firstRevision);
             DocumentQueryProperties properties = fixture.properties(CollectionPurpose.TEST_ONLY);
             DocumentResultWriter writer = new DocumentResultWriter(fixture.mapper);
-            try (GitDocumentLoader loader = new GitDocumentLoader(properties, writer);
+            try (GitDocumentLoader loader = new GitDocumentLoader(properties.storage(), writer);
                     ExecutorService executor = Executors.newFixedThreadPool(3)) {
-                DocumentCatalog catalog = new DocumentCatalog(properties, loader);
+                DocumentCatalog catalog = new DocumentCatalog(properties.storage(), loader);
                 DocumentQueryService service = new DocumentQueryService(catalog,
                         new DocumentCursorCodec(fixture.mapper), new DocumentOperationGate());
                 ReadRequest oldRead = new ReadRequest(new DocumentContext(DocumentFixture.DOCUMENT_REPOSITORY,

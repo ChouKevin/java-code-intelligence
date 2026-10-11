@@ -22,11 +22,20 @@ historical 與薄導覽漏項情境。歷史版修引用時曾誤讀未指定 SH
 該輪未執行人工內容核准／中央 Git 正式發布及 ES／外部文件 MCP；後續文件 MCP
 進度另列下方。Phase 5 自動跨 repo intelligence 暫緩，完整40碼 SHA 與 source API 契約不變。
 
-**目前里程碑：文件搜尋 MCP 已完成本機實作、驗證與 whole-branch final review。**
+**前一里程碑：文件搜尋 MCP 已完成本機實作、驗證與 whole-branch final review。**
 獨立 catalog、search/read/cursor、stateless transport 的 task review 已結案；
 35個 document tests、Source/Relations與Document native journeys 通過。四個選定
 Luna 情境經獨立證據 review 為 PASS_WITH_RECOVERY；舊失敗答案保留，範例仍是 TEST_ONLY。
 [文件 MCP milestone](#文件-mcp-milestone)。
+
+**目前里程碑：local Git 文件更新與 repository management skill 整理已完成實作、本機驗證及 whole-branch final review。**
+文件庫無 remote；local 工具負責具名 Markdown 的 catalog/digests、local commit、
+activation/status，Document MCP 保持 immutable read-only。三個入口為
+manage-repository／describe-repository／query-business-code；source refresh、
+exact historical prepare、文件、optional index 不綁成整套。本輪已完成真實 CLI/MCP、
+新 operator（PASS_WITH_RECOVERY）與獨立 Query-only Luna 雙 MCP（PASS）；
+不沿用前輪結果冒充本輪驗收。見 [local 操作 milestone](#local-git-文件更新與管理-skill-milestone)。
+
 
 ## 不變原則
 
@@ -197,9 +206,10 @@ caller/callee 不屬於前一個 MCP reading milestone。
 
 ## Repository onboarding and dependency preparation — locally verified
 
-- 新增 [onboard-repository](../skills/onboard-repository/SKILL.md)，串接明確授權、
-  registration／allowlist、exact-current source、source roots／核准 JAR、syntax
-  或 opt-in Relations、Query 驗收及 DRAFT 描述交接；AGENTS／README 已導向此入口。
+- Repository management 入口現為 [manage-repository](../skills/manage-repository/SKILL.md)，
+  保留既有 registration／allowlist、exact-current source、核准 roots/JAR、syntax
+  或 opt-in Relations、Query 驗收與 DRAFT 描述交接；下列仍是當時窄範圍證據，
+  不代表新 local 文件操作或改名後情境已通過。
 - 新 operator agent 實際 onboard 一次性小型 Maven-descriptor repo，依 exact POM
   選定 Commons Lang 3.20.0，未使用另一個 3.19.0 cache；source／profile-3 index
   均 COMPLETE，external JAR target 與 digest 經 raw source 核對。
@@ -370,6 +380,28 @@ Whole-branch final review 已結案、無未處理發現；本機成功不等於
 不包含 ES 部署、向量搜尋、自動更新排程、runtime graph、新跨 repo projection、
 真實業務文件發布或主專案 commit／merge／push。已完成 CI routing 與既有
 Dockerfile reactor-POM 相容修改；未執行 Docker／image／CI，也未新增文件服務 image。
+
+## Local Git 文件更新與管理 skill milestone
+
+**實作、本機驗證及 whole-branch final review 已完成，無未處理發現；release 未驗收。** 核准範圍為獨立無 remote 的 local 文件庫，不需
+URL、credentials、fetch/pull/push。Update 只提交具名 Markdown 與 generated
+catalog；activate/status 與 source/index 各自獨立，作者不手填 JSON/self-hash。
+保留使用者 dirty bytes、舊 retained identity、明示撤回及失敗時原 active；
+local commit/selection 不假稱 running MCP 已採用。
+
+- 管理入口 clean rename 為 manage-repository，無 alias；重型 Java/Relations
+  detail 保留單一 reference。describe 負責作者／審閱交接，query 保持唯讀查證。
+- 正式 APPROVED 仍須人工核准確切內容／版本及獨立啟用授權；已授權範例
+  維持 TEST_ONLY/DRAFT/NOT_VERIFIED，不要求逐份人工審閱或冒稱核准。
+- 本輪已完成三個 task review、實際 publisher 缺陷修正、54 document ordinary
+  tests（53 pass／1 unsupported-ACL skip）、3 document native 與2 source/Relations
+  native 情境。修正前完整 reactor365 tests 通過；不把歷史 snapshot 重新計為本輪測試。
+- 六個 guidance baseline/green 情境是文字路由證據；新 operator 實際使用 local CLI，
+  獨立明選 gpt-6-luna 以9次雙 MCP 呼叫完成 exact source 查證。保留 operator
+  的兩個 setup recovery，不將機械 checks 或文字路由冒充端到端證據。詳見
+  [本輪證據](operations/testing.md#local-repository-operations-evidence--2026-10-11)。
+- 不授權既有服務變更、網路／下載、Docker/image/CI、正式資料發布或主專案
+  commit/merge/push；此前歷史失敗與 release limits 保留。
 
 ## 發布與回退
 

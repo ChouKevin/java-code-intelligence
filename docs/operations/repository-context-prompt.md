@@ -1,6 +1,6 @@
 # Repo 導覽預生成與集中式文件交接
 
-這是**外部 author agent** 從核准專案的固定版本產生導覽的交接文字，不是 Source MCP 內建的生成服務。Author 可直接讀取本機 exact Git source，不需要 source 已發布至 MCP、JavaParser index 或專案 build。產物先作本機草稿，經人工核准確切內容與分析版本後，再另行授權交接至**獨立的集中式 Git 文件庫**，不要求修改各業務 repo。文件庫是原稿與歷史來源；未來 Elasticsearch 只是可重建的搜尋索引，由外部文件 MCP 提供搜尋／讀取，query agent 再呼叫既有 codebase MCP 查證。本文件只定交接契約，不實作文件平台或授予設定、commit、push、prepare、重啟服務的權限。
+這是**外部 author agent** 從核准專案固定版本產生導覽的交接文字，不是 Source MCP 生成服務。Author 可讀核准本機 exact Git source，不需 source 已發布、JavaParser index 或 build。產物先作本機 DRAFT；正式 APPROVED collection 須人工核准確切內容／分析版本，已授權 TEST_ONLY 範例例外見下節。另獲寫入／啟用授權後交接至獨立 local Git 文件庫；不需 remote、credentials、push 或修改業務 repo。文件庫保存原稿與歷史；未來 Elasticsearch 只是可重建索引。此契約不授予設定、Git 寫入、prepare 或服務啟停權限。
 
 只需要新增 repo 的簡短業務描述、關鍵詞與查詢入口時，先使用
 [describe-repository skill](../../skills/describe-repository/SKILL.md)。
@@ -57,8 +57,9 @@ repositoryId: {{approvedRepositoryId}}
 ### 草稿、審閱與更新
 
 - 本服務的預設暫存是 `.local/repository-descriptions/<repositoryId>.md` 與 `<repositoryId>-module-guide.md`；不是正式文件服務。
-- 操作者提供已核准中央 checkout 後，建議布局為 `repositories/<repositoryId>/description.md` 與 `repositories/<repositoryId>/guide.md`。未提供時只交付本機草稿，不猜 remote、不建立遠端 repo。
-- 每次發布都先人工核准確切內容與各 analyzedRevision，再另行授權寫入／commit／push。Author 不自動提升 DRAFT；審閱允許散布，但 trust 始終是 NOT_VERIFIED。
+- 操作者提供核准 local 文件庫後，布局為 `repositories/<repositoryId>/description.md` 與 `repositories/<repositoryId>/guide.md`。未提供時只交付本機草稿，不猜 remote、不建立遠端 repo。
+- 正式 APPROVED 更新須人工核准確切內容與各 analyzedRevision，再另行授權具名 local 寫入／啟用；TEST_ONLY 使用下節已授權例外。Author 不自動提升 DRAFT，trust 始終 NOT_VERIFIED。交付 exact primary/related contexts 與真實 review-reference 給 [manage-repository](../../skills/manage-repository/SKILL.md)，由 local 工具生成 catalog/digests、local commit 及 selection；不手填 JSON、不嵌文件自身 hash。不需 remote/fetch/pull/push 或業務 source prepare。
+- 分開報告 local candidate/active/retained、commit/selection 結果與 running Document MCP 查證；local status 或 `serviceVerified:false` 不證明服務採用。結果不明先核對 status/Git/實際 MCP，不盲目重送；activate 不回退作者 HEAD/index/worktree。
 - 每 repo 維護最新核准版，明示按 repo 重產；失敗或待審閱時保留原核准內容，不自動重產所有 repos，也不為每個 commit 生成文件。
 - Outgoing relationship 由來源 repo 的 guide 持有敘述；其他 guide 可指向該段，避免互相複製成多份獨立「事實」。另一側未查則保留未知，不編造 repositoryId 或 SHA。
 - 查歷史 source 時，最新 guide 只決定先查哪裡；找不到路徑就回指定版本 list/search。失效 evidence 明示不可查，不改查 current。
@@ -78,7 +79,7 @@ Docker／下載或主專案 commit／merge／push。測試環境的建立、資�
 
 ### 搜尋與完整章節讀取的輸入契約
 
-下列是獨立 [Document MCP](document-mcp.md)／索引發布層的交接資料，不更動 Source Query API。交接者以確切 Git blobs 建立 `navigation-catalog.json` 與外部 publication selection；作者不需在 Markdown 複製 manifest 或自身 commit。Document MCP 不執行 author、commit、fetch 或發布。
+下列是獨立 [Document MCP](document-mcp.md) 的交接資料，不更動 Source Query API。具授權操作者透過 manage-repository 的 local 工具，以確切 Git blobs 產生 `navigation-catalog.json` 與 publication selection；作者不手填 JSON、不在 Markdown 複製 catalog/digests 或自身 commit。Document MCP 仍只讀，不執行 author、commit、fetch 或發布。
 
 | 身分／資料 | 要求 |
 | --- | --- |

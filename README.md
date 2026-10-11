@@ -18,10 +18,10 @@ Keep real repository registrations, the Query allowlist, credentials and MCP
 client settings local; the public repo contains only generic configuration and
 synthetic fixtures. See [local-only configuration and evidence](docs/operations/source-mcp.md#local-only-configuration-and-evidence).
 
-For agent-operated registration, dependency preparation and JavaParser enablement,
-load [onboard-repository](skills/onboard-repository/SKILL.md). It connects the
-operations guide into an authorized exact-revision workflow, distinguishes syntax
-from opt-in Relations, and requires Query-only acceptance. It does not authorize
+For agent-operated registration, refresh, exact-revision preparation, optional
+JavaParser enablement and local document updates, load
+[manage-repository](skills/manage-repository/SKILL.md). It routes to the existing
+operations guides and requires Query-only acceptance. It does not authorize
 automatic downloads, target builds, existing-service restarts or description approval.
 
 For agent-assisted repository descriptions and pregenerated navigation, read
@@ -32,9 +32,12 @@ JavaParser indexing and target builds are not prerequisites. Real drafts stage i
 `<repositoryId>-module-guide.md`, retaining `DRAFT` / `NOT_VERIFIED`.
 
 The [central document handoff](docs/operations/repository-context-prompt.md#central-document-handoff)
-uses a separate Git document repository for human-reviewed versions. Every update
-requires approval of its exact content and analyzed source revisions, plus separate
+uses a separate **local-only Git** document repository for human-reviewed versions.
+Every formal update requires approval of its exact content and analyzed source revisions, plus separate
 publication authority; no business-repo commit or `prepare_source` is required.
+The [local document command](docs/operations/document-mcp.md#local-git-document-commands)
+commits explicitly named Markdown and generates its catalog; no remote or manual
+catalog editing is required. Local activation and running-MCP verification are separate.
 Latest approved navigation remains available while an explicit per-repo refresh is
 pending or fails. [Document MCP](docs/operations/document-mcp.md) now reads this
 independent Git catalog through `search_documents` and full `read_document`.
