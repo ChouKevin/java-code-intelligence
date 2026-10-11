@@ -2,6 +2,8 @@ package com.java.semantic.mcp;
 
 import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.index.IndexFailure;
+import com.java.semantic.model.source.SourceReadContract.SourceResult;
+import com.java.semantic.query.source.SourceReadText;
 import com.java.semantic.query.source.SourceQueryException;
 import com.java.semantic.query.application.SemanticQueryErrorMapper;
 import com.java.semantic.query.application.SemanticQueryFacade;
@@ -100,8 +102,10 @@ public class QueryMcpToolCatalogConfiguration {
     }
 
     private static McpSchema.CallToolResult callResult(Object result, boolean error, ObjectMapper mapper) {
+        String text = !error && result instanceof SourceResult source
+                ? SourceReadText.render(source, mapper) : mapper.writeValueAsString(result);
         return McpSchema.CallToolResult.builder().structuredContent(result)
-                .addTextContent(mapper.writeValueAsString(result)).isError(error).build();
+                .addTextContent(text).isError(error).build();
     }
 
     private static boolean isIndexOperation(String operation) {

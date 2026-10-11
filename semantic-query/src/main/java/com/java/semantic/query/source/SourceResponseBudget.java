@@ -1,6 +1,7 @@
 package com.java.semantic.query.source;
 
 import com.java.semantic.model.source.SourceReadContract;
+import com.java.semantic.model.source.SourceReadContract.SourceResult;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +21,7 @@ final class SourceResponseBudget {
     }
 
     static boolean fits(Object value, ObjectMapper mapper) {
-        String text = mapper.writeValueAsString(value);
+        String text = value instanceof SourceResult source ? SourceReadText.render(source, mapper) : mapper.writeValueAsString(value);
         Map<String, Object> result = Map.of("content", List.of(Map.of("type", "text", "text", text)),
                 "structuredContent", value, "isError", false);
         int bytes = mapper.writeValueAsBytes(Map.of("jsonrpc", "2.0", "id", Long.MIN_VALUE, "result", result)).length;

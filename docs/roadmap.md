@@ -9,6 +9,25 @@ Phase 1–3、Repository business discovery 與 MCP reading／default-branch cur
 不是重新執行上述 Phase 4 全部 A/B 案例。見
 [onboarding 驗收](operations/testing.md#repository-onboarding-local-evidence--2026-10-10)。
 
+**較早的 Module-aware Guide MVP 已執行 Query-only Luna 驗收，但原精確引用關卡未通過。**
+OMP-style `read_source` 編號文字已實作並通過一般／native MCP 驗證，原始 JSON 契約
+不變。該輪 current 模型引用通過；historical 答案仍留下錯誤縮短路徑，雖然同段
+補上正確版本，原判定保持不變。本 MVP 不新增關係 API、索引或差異化授權。
+
+**Agent 預生成導覽與發布交接已完成本機 milestone：實作、三個 scoped 情境與最終 review 結案。**
+Author 讀固定 source 生成四份待審閱文件；獨立 Luna 經 Query MCP 查證 current、
+historical 與薄導覽漏項情境。歷史版修引用時曾誤讀未指定 SHA，保留 FAIL；
+釐清版本邊界後的新情境 exact-context audit 通過。見
+[本輪證據與限制](operations/testing.md#pregenerated-navigation-local-evidence--2026-10-11)。
+該輪未執行人工內容核准／中央 Git 正式發布及 ES／外部文件 MCP；後續文件 MCP
+進度另列下方。Phase 5 自動跨 repo intelligence 暫緩，完整40碼 SHA 與 source API 契約不變。
+
+**目前里程碑：文件搜尋 MCP 已完成本機實作、驗證與 whole-branch final review。**
+獨立 catalog、search/read/cursor、stateless transport 的 task review 已結案；
+35個 document tests、Source/Relations與Document native journeys 通過。四個選定
+Luna 情境經獨立證據 review 為 PASS_WITH_RECOVERY；舊失敗答案保留，範例仍是 TEST_ONLY。
+[文件 MCP milestone](#文件-mcp-milestone)。
+
 ## 不變原則
 
 1. 證據優先序：指定 Git commit 的 code > semantic/symbol index > guide/README/docs。
@@ -192,6 +211,43 @@ caller/callee 不屬於前一個 MCP reading milestone。
   執行、私有套件下載、多模組複雜依賴、正式部署或 image／CI；不宣稱所有 repo
   均可自動成功。Phase 5 未啟動。
 
+## Module-aware Guide MVP — pending runtime acceptance
+
+- 沿用 `PROJECT_GUIDE.md`／`project-guide-path`，以固定 Markdown 欄位記錄
+  application、library、aggregator 與 unknown modules，附路徑、入口、用途、
+  exact-source 證據、人工說明及未涵蓋範圍。
+- BUILD_DEPENDENCY 與 HTTP_CALL／EVENT_PUBLISH／EVENT_CONSUME／SHARED_CONTRACT
+  分開描述；文件 labels 不是新的 MCP enums，也不會建立已驗證 graph edges。
+- 同 repo modules 共用固定 SHA，跨 repo 各自固定 context；先依 guide 導覽，
+  再讀雙側 source／必要設定。Guide 分析 SHA 不同不自動判定過時，實際衝突以
+  指定版本的原始碼為準；可執行入口不等於已部署服務。
+- 本 MVP 假設所有內部讀者可查全部納入的 repo／module，不新增 ACL 或關係
+  遮蔽；既有 Query token、allowlist、Indexer 管理隔離與 secret hygiene 不變。
+- 驗收定義見 [module-aware guide acceptance](operations/mcp-agent-acceptance.md#module-aware-guide-acceptance)：
+  兩個 repo，其中一個含兩個 application entries 與共用 library；核對 build
+  宣告、HTTP 候選、過時 guide、不同版本及缺少部署設定。必須由明確指定
+  `gpt-6-luna` 的 Query-only client 實際讀取，不能以文件或 fixture 建立代替。
+- 範本與 skills、兩個合成 Git repos、current／historical 情境已完成並通過
+  靜態 review；文件連結、fixture Git/blob/byte/XML 及引用範圍檢查已通過。
+- Host 容量恢復後，已用 bounded JVMs 與明確指定 `gpt-6-luna` 的獨立 Query-only
+  clients 執行 current／historical 情境。自建程序 RSS 合計取樣峰值約 438 MiB。
+- 已驗證 source-only 讀取、獨立 SHA、module／build 宣告及 endpoint 差異；
+  模型曾送出錯誤 cursor／depth，server 明確拒絕，後續查詢完成且未改換版本。
+- 已更新 query skill：結論綁定原文、LF 行號、guide/source 雙側引用、交付前
+  raw ranges 核對及逐字沿用識別。歷史情境重跑的 R3 引用涵蓋真正的 L52。
+- 先前純 skill 複測未通過：current 回答把 `apps/member-api/...` 改寫成不存在的
+  `apps/member/api/...`；補上識別複製規則後仍再次發生。不能只靠更多提示或重跑
+  宣稱已解決。該輪失敗答案、MCP traces 與範圍／識別審核均保留；見
+  [實際驗收紀錄](operations/testing.md#module-aware-guide-verification-status--2026-10-10)。
+  此 milestone 尚未驗收完成；正式 Phase 5 跨 repo projection/index 仍未啟動。
+- OMP-style 讀檔呈現已完成：成功的 MCP `read_source` 文字提供精確 locator、
+  原始 LF 行號、半行／省略標記與完整頁面 metadata；HTTP 與 structuredContent
+  保持原始 SourceResult。Wire budget 計入新呈現，相關 native／image callers 已遷移。
+- 320 項一般測試、2 項實際 native MCP journeys 通過；新執行檔上的 Luna current
+  回答 22 筆引用通過。Historical 有 16 筆有效引用，但還留下一筆 `MemberApi.java`
+  縮短路徑；自行在同段補正不等於刪除錯誤引用。因此編號功能完成，模型引用關卡
+  仍未通過。此輪 model-smoke 程序 RSS 合計取樣峰值約 434 MiB，不含 Maven/native lane。
+
 ## Phase 5 — Cross-repo Intelligence
 
 - 以多個固定 contexts 組成 revision vector，不發明跨 repo 的單一 latest revision。
@@ -199,6 +255,121 @@ caller/callee 不屬於前一個 MCP reading milestone。
 - 每個 repo 分別授權；另一側不可見時不得洩漏其名稱、path 或 evidence。
 - 驗收：跨 repo fixture 有可追溯鏈；不同 revisions／權限遮蔽下不猜測關係。
 - 回退：停用 cross-repo projection/tool，不改各 repo source contexts。
+
+## Milestone — Agent 預生成導覽與發布交接（實作與本機驗收）
+
+**已確認架構：** author agent 直接讀核准的固定 commit → 集中式 Git 文件庫 →
+人工核准版本 → 未來 ES 搜尋索引／外部文件 MCP → query agent → 既有 codebase MCP。
+中央 Git 保存正式文件與歷史；ES 是可重建的搜尋索引，不是獨立維護的第二份原稿。
+文件 MCP 與 codebase MCP 各自獨立，由 agent 串接；本服務不直接依賴 ES。
+
+### 本輪交付與邊界
+
+1. **預生成流程：** author agent 可直接探索核准專案的 tracked source，但固定完整
+   SHA，不混入未提交內容、忽略檔、credentials 或本機建置產物，不執行目標專案。
+   可讀整體專案不等於逐檔讀完；明列已讀／未讀範圍。
+2. **既有模板調整：** 沿用短版描述與 module-aware guide，提供 repo 總覽、
+   module 章節、業務詞／識別字／程式入口，以及有雙側證據或未知標記的跨 repo
+   關聯。目的在「去哪裡查、為何先查」，不是預先複製所有公式與業務答案。
+3. **集中式發布交接：** `.local/repository-descriptions/` 僅作草稿暫存；
+   每次更新都須人工核准確切內容與分析版本，另經授權交接到獨立中央 Git 文件庫。
+   不要求提交至各業務 repo，不自動改服務設定、prepare 或發布。
+   本輪不建立實際遠端文件庫，不把設計核准冒充產出內容核准。
+4. **外部搜尋輸入契約：** 定義文件 repo／文件 revision／path／章節定位、
+   source repositoryId／analyzedRevision、審閱與 trust metadata；搜尋片段需能
+   取得相同文件版本的完整章節。文件 commit 與業務 source SHA 必須分開，
+   文件版本由發布層附加，不要求文件嵌入自身 commit。
+   僅定義核准版本輸入與舊章節替換規則，不實作 ES ingestion 或文件 MCP。
+
+### 文件生命週期與查詢規則
+
+- 每個 repo 維護最新核准導覽並保留 Git 歷史，不為每個 source commit 生成文件。
+  明示按 repo 更新；生成失敗或等待審閱時，原核准版保持不變，不新增自動排程。
+- 最新導覽查歷史 SHA 時只是導航線索；路徑不存在即回該版本 list/search，
+  不切换 current。分析 SHA 不同不自動判定內容過時，缺少或過期證據明示不可查。
+- 文件只決定優先順序；完整不帶 filter 列舉 repo，再深入文件命中的候選。
+  無命中、證據不足或跨 repo 線索時擴大查詢，不把未查範圍說成不存在。
+- 文件與 source 衝突時，以指定版本 source 查證；跨 repo 各自固定 context，
+  method／path 或名稱相同不證明部署與 runtime wiring。文件始終是 NOT_VERIFIED
+  導覽，人工核准不是 server verification。
+- 既有 `navigation-hint`／`project-guide-path` 仍是受支援的 server 功能；
+  新的中央文件流程不依賴它們發布，不為此次切換移除其 API 或重寫 source。
+- 保留完整 40 碼 SHA、完整 repo-relative path、原始行號；不新增短引用 ID、
+  短 SHA、引用解析服務或 codebase MCP 欄位。
+
+### 驗收與執行順序
+
+- 先定 canonical 模板及文件交接契約，再分開調整 author/onboarding 與 query/
+  acceptance skills，整合 README／操作指南；共享文件由單一整合者負責。
+- 用既有多 module／多 repo fixtures，由 author agent 真正讀固定 source 生成
+  新導覽，不把人工預寫 guide 或舊答案當作生成結果。
+- 獨立且明確指定 `gpt-6-luna` 的 query agent 只取得文件測試輸入與 Query MCP，
+  不取得本機業務 source、作者推理、oracle 或 Indexer 權限。核對業務查找、
+  歷史版本、文件漏項／衝突及關聯另一側未知，保留完整 trace 與原始答案。
+- 分開記錄引用識別／範圍有效、原文支持結論、以及模型是否明確自行更正。
+  後續人讀答案驗收允許「明確指出錯誤引用並為同一主張提供已讀、有效且支持
+  結論的更正」通過並保留恢復紀錄；僅追加無關引用、未更正或無證據仍不通過。
+  不手動修模型答案，也不宣稱可安全擷取所有出現過的 locator。
+- 舊 Module-aware Guide／numbered presentation 驗收保留原判定，不追溯改成通過。
+  本輪文件由驗收流程明示交付，不能宣稱已測外部文件搜尋；草稿測試也不證明
+  已完成內容審閱或正式發布。分開列生成、交接、code 查證、發布及外部整合狀態。
+- 依 host headroom 與既有安全規則使用單一有界驗證 lane、一次性 roots；文件修改
+  不要求 Maven，實際 agent／MCP 情境另行執行。保存工具／讀取量與耗時，
+  沒有可比基準不宣稱效能改善。完成後凍結 writers 並 review。
+
+**不包含：** ES／外部文件 MCP 建置、向量搜尋、自動更新排程、新跨 repo 索引／
+匹配 API、runtime graph、新 ACL、JDT、強制 JavaParser indexing、依賴下載、
+既有服務／資料變更、Docker／image／CI 或 project commit／merge／push。
+本輪已更新 canonical 契約、author／query／onboarding skills 與入口文件，並完成
+真實模型生成及隔離 Query MCP 情境。正式發布仍需人工內容核准；範例測試不需等待。
+尚未建立／發布中央文件庫或執行外部搜尋整合。既有 token／allowlist／Indexer 隔離與 release gates
+不變，Phase 5 自動 projection 仍未啟動。失敗、修正與各 gate 狀態見上方驗收證據。
+
+
+## 文件 MCP milestone
+
+**目標：** 不再把四份導覽全文預先塞入 query prompt。Agent 先從獨立文件 MCP
+搜尋與讀取文件，找到 repo／module／source 起點，再用既有 codebase MCP 查證。
+採集中式 Git 文件快照及有界 literal 搜尋；Elasticsearch 留待後續規模需求。
+新增獨立 `document-query`，不在 Source Query 引入 Git、ES 或模型依賴。
+本輪實作與隔離測試已核准；正式發布及部署仍需另外授權。
+
+### 實作順序
+
+1. **測試文件庫與版本交接。** 沿用目前兩個範例、四份已稽核生成文件，建立
+   隔離的中央 Git 測試文件庫。由交付層附加實際文件 commit、path、章節定位、
+   source contexts 與 test-only provenance；不嵌自身 hash，不更動業務 source。
+   測試資料與正式可發布資料分開，範例不用逐份人工審閱，但仍核對引用與支持度。
+2. **獨立文件 MCP。** `search_documents` 有界分頁，命中附 exact 文件身分與
+   section locator／snippet；`read_document` 固定該文件 commit，回傳有上限的
+   單一完整文件及所選章節，含 header、contexts、evidence 與限制，不偷偷改版。
+   沿用中央交接契約，不增加 codebase MCP 的資料庫、ES 依賴或請求欄位。
+3. **Agent 串接。** 更新 query skill，先文件搜尋、再讀所需章節、最後查 source。
+   無命中或文件不足時回 codebase 的完整 repo discovery 與 source navigation；
+   文件不限制可查 repo，也不能用分析 SHA 覆蓋使用者指定 SHA。
+4. **隔離端到端驗收與 review。** 明確指定 `gpt-6-luna`，查詢端只接文件 MCP
+   與 Query MCP，不給本機 source、預載導覽全文、author trace 或 Indexer。
+   保留兩個 MCP 的完整 trace、版本身分、答案與失敗紀錄，再作獨立 review。
+
+### 完成條件
+
+- 業務問題能經「文件命中 → 完整章節 → exact source」取得支持結論的證據。
+- 最新文件搭配指定歷史 source 時維持各自版本，不擅自擴大 source revisions。
+- 文件漏項／無命中能擴大查找；相同 method/path 仍只證明候選，不聲稱部署關係。
+- 文件更新後搜尋與讀取不混版；更新失敗不破壞原可讀版，舊命中不偷偷改指新版本。
+- 範例可直接驗收，但始終標示 test-only／NOT_VERIFIED；正式发布規則不被繞過。
+- 新服務啟動前檢查 Linux／host 容量，單一有界驗證 lane、一次性 roots，完成後
+  清理；沒有實際 headroom 證據不宣稱資源可承受。
+
+詳細設計／計畫保留於本機 `docs/superpowers/`；四個 task review 與修正已完成。
+新搜尋只讀 active 文件版本；cursor／明確讀取可繼續使用 retained 舊文件版本。
+文件與 source SHA 獨立，不為每個 source commit 重產文件。實際 ordinary/native、
+雙 MCP Luna 的結果與重試／拒絕紀錄見
+[文件 MCP 驗收](operations/testing.md#document-mcp-local-evidence--2026-10-11)。
+Whole-branch final review 已結案、無未處理發現；本機成功不等於 release/image/CI 已通過。
+不包含 ES 部署、向量搜尋、自動更新排程、runtime graph、新跨 repo projection、
+真實業務文件發布或主專案 commit／merge／push。已完成 CI routing 與既有
+Dockerfile reactor-POM 相容修改；未執行 Docker／image／CI，也未新增文件服務 image。
 
 ## 發布與回退
 

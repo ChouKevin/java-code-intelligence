@@ -5,6 +5,25 @@ source-first, syntax-index and opt-in static Relations contracts, **not** target
 repository business builds, production TLS or operational capacity. Model reasoning
 requires the separate explicit agent lane below; native success is not agent proof.
 
+**Document MCP milestone:** implementation, four scoped task reviews, ordinary/native
+checks and independent four-case dual-MCP Luna evidence review are complete.
+The selected agent gate is PASS_WITH_RECOVERY for one actual BUSY retry; rejected
+answers remain failures. Whole-branch final review is closed with no open findings.
+See [document evidence](#document-mcp-local-evidence--2026-10-11) and
+[operations](document-mcp.md); images/CI/publication are separate pending gates.
+
+**Pregenerated navigation milestone:** centralized author/handoff/query guidance
+is implemented. Explicit-Luna author generation, current/historical Query and
+thin-navigation expansion ran against disposable source-only services. Exact-source
+audits and independent semantic review pass for the selected final runs.
+Failures and publication limits are retained in the [new evidence](#pregenerated-navigation-local-evidence--2026-10-11).
+
+**Earlier Module-aware guide MVP:** OMP-style numbered MCP source text is implemented;
+320 ordinary tests and two real native MCP journeys passed. Fresh Luna current
+citations pass their scoped audit; historical output still retains a shortened
+invalid path despite an inline correction. The presentation is verified, but
+overall model citation acceptance remains **not passed**. Image/CI is unexecuted.
+
 **Phase 4 status:** local implementation and independent final review are complete.
 All four production findings and the expanded native-fixture finding are closed.
 Final ordinary/native evidence passed; Luna evidence is explicitly prior-snapshot.
@@ -25,6 +44,93 @@ nine checked repository/SHA identities. The first-round answer omission and
 fresh verification are preserved in [evidence](#repository-business-discovery-local-evidence--2026-10-09)
 and [agent acceptance](mcp-agent-acceptance.md#repository-business-discovery-acceptance).
 
+## Pregenerated navigation local evidence — 2026-10-11
+
+This milestone changes guidance only, not Java, API, configuration or executable
+behavior. The canonical [central handoff contract](repository-context-prompt.md#central-document-handoff),
+author/onboarding skills, query skill and entry-point docs now distinguish exact
+business-source identity from independently published document identity.
+
+- An actual author client read ten approved Java/POM Git-blob exports across the
+  owned `member-suite` and `pricing-service` fixtures, then generated two short
+  descriptions and two module guides. Existing guides/answers were excluded.
+  Final surgical model edits preserved the source-export digests. Independent
+  artifact review closed six findings; all four outputs remain
+  `DRAFT / NOT_VERIFIED / UNAPPROVED / UNPUBLISHED`, not human-approved documents.
+- Author and Query clients explicitly selected `gpt-6-luna` using Codex CLI
+  `0.162.1`; provider-reported model identity was unavailable. Query had only named
+  document inputs and Query MCP, no local-source tools, author reasoning or Indexer
+  credentials. Local delivery is not an external document-MCP search.
+- The published contexts were member-suite
+  `fd5c17ed05ac4b7b9d254bb1209f176fe73cd3dc`, pricing current
+  `046560615284124d1513b2645d2d9dc056b88ba1`, and pricing historical
+  `f5a207cfc2e8d34778ee537dac3f2655a4e7417e`. Three source jobs completed;
+  controller raw HTTP checks matched all twelve source files across these contexts
+  to exact Git bytes. Repo-local guide discovery was disabled and semantic indexes
+  remained NOT_READY. Query continued after the owned Indexer stopped.
+
+| Selected Query run | MCP calls | Raw segments / bytes | Source citations | Observed source audit |
+| --- | ---: | ---: | ---: | --- |
+| Current, reviewed generated drafts | 38 | 20 / 13,131 | 10 | Exact contexts, bytes, paths and ranges valid |
+| Historical, clarified pinned-version rule | 25 | 6 / 7,568 | 5 | Exact requested contexts only; document/source route discrepancy found |
+| Thin navigation, independently labeled header-only input | 43 | 20 / 13,001 | 11 | Expanded to both repositories; exact source evidence found |
+
+Each selected run completed the unfiltered two-repository catalog in one page
+and used no local source. Current and final historical runs had no MCP tool errors.
+The thin run had **five recovered INVALID_ARGUMENT calls**: two `list_files`
+requests used `path` instead of `directory`, and three used unsupported `depth: 3`.
+The model corrected these arguments without changing source pins; the 43-call
+total includes those attempts. This is tool-argument correction, not citation
+recovery. The original audit missed failed item status because outer `error` was
+null; corrected `trace-audit-v2.json` records all five, preserving raw events and
+the invalidated audit. No model rerun was needed to establish this trace fact.
+
+Independent review supports all three scoped behavioral results. Historical
+wording sometimes calls the document analysis SHA “old”; this does not establish
+chronology. The accepted conclusion is only that the document's analyzed route
+differs from the requested historical source route. Original wording is retained.
+These are small synthetic fixtures, not a nine-repo ranking, multipage catalog or
+real business-policy acceptance. Formula/entry/build declarations and candidate
+HTTP matching remain separate from unobserved deployment/runtime wiring.
+
+**Failures retained, not promoted:** initial generated output used export-prefix
+paths and misplaced/cross-repo evidence; one revision omitted requested documents.
+Whole-document regeneration later truncated four SHAs. An initial throwaway
+audit incorrectly filtered malformed SHA rows out; the corrected audit recognizes
+evidence rows before validating identity and reports eighteen final table rows,
+with member short-description evidence separately reviewed. The original outputs
+and invalidated audit remain in private evidence.
+
+An initial historical answer omitted section locators. A later answer cited a
+nonexistent document heading; its attempted repair additionally read an unselected
+current SHA and is **FAIL**, regardless of its self-reported PASS_WITH_RECOVERY.
+The query skill now separates document/source comparison from authorized
+source/source comparison and requires real section locators. A fresh historical
+run exercised that fix; failed answers are not rewritten or retroactively passed.
+The earlier Module-aware Guide acceptance below retains its original criterion.
+
+**Execution scope:** no Maven rebuild this round. The unchanged executable hashes
+match the preceding 320-ordinary/two-native verified snapshot; those counts are
+reused evidence, not new executions. Preflight found Linux available memory
+19,973 MiB, no swap use, and backing Windows free memory 11,471,220 KiB. Owned JVMs
+used `-Xms32m -Xmx256m -XX:ActiveProcessorCount=2`, separate disposable roots and
+sequential Indexer/Query operation. Client-result elapsed values include time
+until collection, so they are not model latency benchmarks. The initial in-memory
+RSS series was lost on controller-kernel restart. The retained final historical
+window contains 224 two-second samples, peak owned Query/client RSS 444,560 KiB
+(about 434 MiB); this excludes remote inference and is not a whole-run/host peak.
+Owned services exited and the disposable runtime root was removed; retained
+fixtures, draft handoff and evidence were not deleted.
+
+Private evidence is under `.superpowers/sdd/2026-10-11-pregenerated-navigation/`;
+the reviewed draft handoff is
+`.local/repository-descriptions/pregenerated-navigation-2026-10-11/reviewed/`.
+Raw model outputs, invocations, full MCP traces, input digests and rejected attempts
+are retained separately. Human approval of exact output, an authorized central
+document checkout/commit, ES ingestion, external document MCP, image/CI and real
+deployment acceptance remain unexecuted. No project commit/merge/push or changes
+to existing services/data are authorized by this result.
+
 ## Agent model for MCP query acceptance
 
 When MCP query testing requires an agent, use **GPT 6 Luna** (`gpt-6-luna`) by
@@ -34,8 +140,9 @@ actual invocation/client version, selected model, full MCP events, final answer
 and exact Git-backed citations. Report any provider-reported model identity
 separately from the requested model; never invent identity evidence.
 
-Use Query-only credentials and an explicit disposable-client configuration,
-without changing global settings/login or allowing local fixture/oracle tools.
+Use Source Query-only credentials, adding the independent Document MCP read token
+only for document-navigation cases, and an explicit disposable-client configuration.
+Do not change global settings/login or allow local fixture/oracle tools.
 Model unavailability is a blocker, not permission to silently use another model.
 Reuse valid same-snapshot ordinary/native results; run the changed model-client
 scenario and inspect its actual continuations, source evidence and answer.
@@ -59,12 +166,12 @@ Deletions and both sides of renames count; mixed changes take the union.
 
 | Changed surface | Ordinary reactor | Native journey | Images |
 | --- | --- | --- | --- |
-| Only known prose: README.md, AGENTS.md, docs/** | no | no | no |
+| Only known prose: README.md, AGENTS.md, docs/**, skills/**/*.md | no | no | no |
 | Root/module POMs, shared Model, CI or selector scripts | yes | yes | yes |
-| Other Indexer/Query main Java (excluding the full-gate paths below) | yes | yes | no |
-| App resources/config/security/bootstrap, origin/startup/source admission and index parser/SQLite/publication/read paths | yes | yes | yes |
+| Other Indexer/Query/Document main Java (excluding the full-gate paths below) | yes | yes | no |
+| App resources/config/security/bootstrap, origin/startup/source admission, document catalog/Git admission, and index parser/SQLite/publication/read paths | yes | yes | yes |
 | Ordinary test sources/helpers only | yes | no | no |
-| SourceMcpJourneyIT, SourceRelationsJourneyIT, NativeJourneySupport, native journey launcher, video source corpus | no | yes | no |
+| SourceMcpJourneyIT, SourceRelationsJourneyIT, NativeJourneySupport, DocumentMcpJourneyIT, native journey launchers, video source corpus | no | yes | no |
 | Dockerfiles, .env.example, image smoke launcher | no | no | yes |
 | Unknown/unavailable diff or explicit full gate | yes | yes | yes |
 
@@ -81,6 +188,8 @@ mean zero workflow events. Optional `workflow_dispatch` selects all lanes for
 final acceptance once registered on the default branch. Superseded runs cancel
 only within the same PR/ref. Each lane checks out the exact PR head, not the
 synthetic merge commit.
+The existing `source-journey` job runs source journeys and then the independent
+document journey serially. No fourth selector output or document image is added.
 
 `Feature acceptance` is the terminal gate: selected lanes must succeed; failures,
 cancellations and unexpected skips fail closed. An intentional docs-only
@@ -101,6 +210,7 @@ local native evidence does not satisfy the unexecuted image/CI gates.
 | Scope selector regressions | Bash and Git | Temporary local Git only; no JVM/container/services |
 | Ordinary native tests | Java 21, Maven 3.9.x; Git, actual rg for source tests; SQLite JNI-capable libc/CPU and private writable/executable temp | No external database, Docker or language-server service |
 | Native MCP journey | Java 21, Maven 3.9.x, Git, absolute real ripgrep, SQLite JNI/private temp | Independent JVMs/disposable source/index roots; no target-repository builds |
+| Document native journey | Java21, Maven3.9.x, Git; no rg/parser/SQLite requirement for this module | Bounded separate JVMs and private Git/selection root, actual stateless HTTP/MCP |
 | Final image builds/smoke | Authorized isolated Docker builder/engine, Git, curl, jq, jar, javac; Java 21/Maven 3.9.x | Writer UID 10001 / reader UID 10002; Query receives only two read-only published children, JNI temp separate |
 | Source/index runtime | Separate admin/read tokens, Indexer-only Git credentials, Query allowlist, private/source/index POSIX roots and per-process JNI temp | Embedded SQLite, not an external DB service; preserve unrelated services/data |
 
@@ -134,6 +244,21 @@ mvn --batch-mode --no-transfer-progress -Dsource.test.rg="$SOURCE_TEST_RG" test
 # Changed source boundary only, admitted as one serial lane.
 SOURCE_TEST_RG="$SOURCE_TEST_RG" scripts/test-source-mcp.sh
 ```
+
+Document boundary templates:
+
+```bash
+mvn --batch-mode --no-transfer-progress -pl document-query -am \
+  '-Dtest=Document*Test,MarkdownSectionsTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+MAVEN_CMD=/absolute/path/to/maven-3.9/bin/mvn bash scripts/test-document-mcp.sh
+```
+
+The document launcher bounds Maven and test JVMs, snapshots its executable and
+reaps/removes only owned runtime resources; it retains sanitized acceptance JSON.
+Document process tests do not establish external agent routing, semantic answers,
+formal document approval, images or production capacity.
 
 Phase 3 focused templates (controller-owned, after relevant writers finish):
 
@@ -292,6 +417,178 @@ socket and image checks do not establish idle-session capacity, external
 OMP/Codex/Claude model-client acceptance, private-production Git access, deployed
 TLS, or 50-user capacity. Image/mount checks and external release-environment
 acceptance remain separate from native source verification.
+
+### Module-aware guide verification status — 2026-10-10
+
+Scope is guide/skill prose with two synthetic Git source fixtures, not a new
+server API, index format or permission mechanism. The selected
+`feature/module-aware-guides` worktree starts at
+`bd5f29ae38d0ed502bbc5aa4ef1bd393d23e052a`; prior production runtime verification
+is retained but does not cover the new querying instructions.
+
+The required [module-aware guide scenarios](mcp-agent-acceptance.md#module-aware-guide-acceptance)
+exercise independent application entries, shared-library build declarations,
+candidate cross-repo HTTP navigation, stale guide/source conflicts and a retained
+old endpoint SHA without retargeting. All onboarded fixture repos/modules are
+readable by the same internal client; no differential-authorization gate is added.
+Guides must also work in source-only mode without JavaParser/Relations readiness.
+
+**Actual runtime lane executed:** the initial 433,972 KiB backing-host free-memory
+blocker was superseded by a new user-authorized admission with 13,587,844 KiB free
+on Windows and 17,326 MiB available in Linux, swap unused. Existing production
+executables were reused by their recorded SHA-256 identity, without a build.
+Disposable services used Java 21, `-Xms32m -Xmx256m` and
+`-XX:ActiveProcessorCount=2`. Three source requests reached COMPLETE: member
+current, pricing current and retained pricing historical. All 18 published file
+snapshots matched exact Git bytes; semantic status remained NOT_READY.
+
+Indexer was stopped before all model calls. Fresh Codex CLI 0.162.1 clients
+explicitly selected `gpt-6-luna`, with only Query MCP, separate read credentials,
+no local-source/admin tools, neutral questions and the updated query skill.
+Provider-reported model identity was not available. Two initial runs and two fresh
+citation-completeness runs were serial; their complete prompts, invocations,
+MCP events, answers and audits are retained, not overwritten.
+
+Final current/current used 40 MCP calls; final current/historical used 18.
+Unfiltered catalog pagination completed and independent exact source pins were
+preserved. Answers distinguished module/build/entry identities, both library
+dependencies, unknown deployment origin, current guide/source route disagreement
+and historical consumer/provider path mismatch. The final pair also made two
+altered-cursor and five unsupported `depth: 3` requests; Query returned
+INVALID_ARGUMENT and the clients recovered. These are observed client errors,
+not zero-error runs or evidence of a server failure.
+
+**Initial acceptance finding A1 — failed in this round:** all 22 final raw source segments matched
+Git bytes, digests and byte/line spans; all 54 cited ranges existed within source
+actually read. That is not sufficient semantic citation proof. In the historical
+answer, the guide HTTP_CALL candidate claim cites member `PROJECT_GUIDE.md:L44-L50`,
+which ends at BUILD_DEPENDENCY R1; the claimed R3 is at L52. Initial answers omitted
+guide citations, and a neutral completeness instruction did not eliminate this
+misalignment. This failed evidence is preserved; the later citation-workflow
+recheck below supersedes its current finding status, not the original results.
+
+Observed owned-process RSS sum peaked at **438.46 MiB (0.428 GiB)**, sampled every
+two seconds across live services/clients and their descendants. RSS can count
+shared pages twice and miss between-sample peaks; this is not a hard memory cap
+or a Windows-wide delta. After shutdown, Windows free memory was 13,652,116 KiB
+and Linux available memory 17,352 MiB, swap unused. All owned processes were
+terminated/reaped and the owned temporary root removed. Existing services and
+synthetic fixture Git histories were preserved.
+
+**Citation-workflow recheck:** the query skill now binds claims to source excerpts,
+uses LF-based original line positions, requires attached guide/source evidence,
+and requires explicit raw-range verification before delivering disputed or
+cross-version claims. A front-loaded completion gate made those MCP verification
+actions observable; a later rule also requires verbatim full repo/SHA/path identity.
+Acceptance separately checks range/identity validity and actual claim support.
+
+Fresh source-only publications and explicit `gpt-6-luna` clients used the same
+owned fixture revisions and executable hashes, with Indexer stopped before
+queries. Five serial client runs are retained: the first pair still failed guide
+attachment; the explicit-gate pair corrected the historical range but exposed a
+current path-copy defect; one final current run exercised the new identity-copy
+rule. No failed answer was edited, discarded or supplied as a source oracle.
+
+- `historical-recheck`: 21 MCP calls, 19 raw segments and 11 exact answer citations
+  audited. R3 cites `PROJECT_GUIDE.md:L46-L57`, including the actual row at L52,
+  after an explicit raw-range read. Attached source sides retain independent
+  exact versions; human-note and old-provider guide claims also have supporting
+  passages. One changed discovery cursor was rejected and recovered. Scoped
+  claim-support review passes; A1 is closed for this run.
+- `current-identity-recheck`: 47 MCP calls, 30 raw segments, no tool errors. Raw
+  bytes/digests/spans passed, but only 22 of 23 complete citations match source
+  actually read. Answer line 26 changes `apps/member-api/.../MemberApi.java` to
+  nonexistent `apps/member/api/.../MemberApi.java`. This repeats the defect from
+  `current-recheck` despite the identity-copy rule. Guide R3 and current endpoint
+  range comparisons improved, but finding A2 prevents acceptance. A separate
+  guide runtime-wiring statement also lacks a nearby exact guide citation.
+
+The historical pass precedes the final identity-copy wording addition; it is
+reused only for unchanged historical claim/range behavior, not as proof of that
+new rule. The final current run tests that rule and fails it. More identical
+reruns or manual answer repair would not establish reliable citation delivery;
+any deterministic client citation validation/rendering or server presentation
+change needs its own scoped implementation and verification.
+
+This recheck's owned-process RSS sum peaked at **436.38 MiB (0.426 GiB)** with the
+same two-second sampling caveats. All owned services/clients were reaped and the
+owned temporary root removed; fixture Git histories and evidence remain.
+Evidence lives beside the initial run under `citation-verification/`, including
+per-run skill digests/prompts, complete traces/answers, claim/range audits,
+`acceptance.json`, `memory-summary.json` and `cleanup.json`. The milestone remains
+unaccepted; no production API or global client setting was changed.
+
+**OMP-style numbered presentation:** successful `read_source` MCP text now exposes
+exact quoted identities/locators, original LF-numbered source rows, explicit
+partial-line/unread-elision markers and complete page/provenance metadata.
+HTTP JSON and MCP `structuredContent` remain the original SourceResult; errors
+and other tools retain JSON text. Source response budgeting measures the new
+display and raw structured data together. Native/image smoke consumers were
+migrated off parsing successful source display text as JSON.
+
+Java 21 and installed Maven 3.9.6 ran offline with 512 MiB Maven/test heaps,
+two active processors and one test fork. The initial reactor passed Model 9 and
+Indexer 172 tests; Query had one new assertion expecting text absent from its
+fixture. That invalid incidental assertion was removed without changing source
+or weakening byte/budget checks. Model 9 and Query 139 then passed; unchanged
+Indexer evidence was reused. The resulting **320 ordinary tests** cover original
+coordinates, Unicode/CRLF/blank/disjoint lines, mid-line continuation, summary
+elision, EOF/empty reads, structured parity and actual SDK wire limits.
+`SourceMcpJourneyIT` and `SourceRelationsJourneyIT` then both passed against
+newly packaged selected-worktree binaries and disposable real services.
+
+With Indexer stopped, fresh explicit `gpt-6-luna` clients on Codex CLI 0.162.1
+received only Query access and the updated skill/neutral questions:
+
+- Current/current: 45 MCP calls, 23 source pages, 32 raw segments and 22 answer
+  citations. Actual display audit checked 585 original numbered rows and all page
+  metadata against structured source. Exact citation identities/ranges and scoped
+  claim-support review passed; one malformed discovery cursor was rejected and
+  recovered.
+- Current/historical: 28 MCP calls, 15 source pages and 20 raw segments.
+  Display audit checked 454 numbered rows and unchanged raw metadata. Sixteen
+  citations are valid, but answer line 7 also includes a shortened
+  `member-suite@...:MemberApi.java:L26-L44` locator which is not that repo path.
+  The model acknowledges and supplies the correct full path in the same paragraph,
+  yet retains the bad citation in its delivered answer. This is not accepted or
+  manually repaired. One malformed cursor and three invalid depth requests were
+  rejected; exact source contexts remained pinned.
+
+Numbered presentation is therefore verified, not a guarantee of final model
+citation correctness. Prior failures remain retained. The model-smoke owned RSS
+sum peaked at **433.97 MiB (0.424 GiB)** under two-second sampling; this excludes
+the earlier Maven/native lanes and is not a hard limit or whole-host delta.
+All owned services/clients were reaped and both temporary roots removed.
+Evidence is under the local `numbered-presentation/` directory, including new
+runtime hashes, ordinary/native results, full client traces, raw/display/citation
+audits and cleanup. The client auditor now reads Codex JSONL's
+`result.structured_content` rather than treating the numbered text as JSON.
+Image smoke received a shell syntax check only; Docker/images/CI, production
+isolation, target business execution and deployed traffic are not claimed.
+
+**Executed preparation checks:** local Markdown links in all ten changed guidance
+files passed (97 destinations, including 52 heading links). Initial six Git
+snapshots covered 34 file snapshots and 12 XML descriptors; three fixed-template
+successors added 18 file snapshots and six XML descriptors. Git object identities,
+SHA-256 digests, byte lengths and line-byte oracles matched. The member guide-only
+publication preserves analyzed source; the pricing successor changes only endpoint
+source while retaining identical guide bytes. All 14 fixed-template source
+citations resolve to existing exact-revision line ranges. These are input checks,
+not compilation, target execution or MCP/model evidence.
+
+Workflow and fixture reviewers closed all preparation findings, including fixed
+template conformance. `scripts/verification-scope.sh --full` conservatively selected
+unit, journey and image gates; selection is not execution or image authorization.
+No Maven/container checks were run during that prose-only preparation stage;
+the later numbered-presentation Java verification is recorded above.
+
+Preparation records remain in `.superpowers/sdd/2026-10-10-module-aware-guides/`.
+Initial runtime evidence is under its `runtime-acceptance/` child; later skill
+and presentation results are under `citation-verification/` and
+`numbered-presentation/`. Actual Maven/native results apply only to the latter
+recorded snapshot. No target execution, Docker/image/CI, production isolation or
+deployed-traffic result is claimed. No project commit/merge/push was performed;
+the overall exact-citation gate remains open.
 
 ### Repository onboarding local evidence — 2026-10-10
 
@@ -584,6 +881,111 @@ project commit/merge/push occurred. Verification used a serial bounded local lan
 No Docker/image/CI or new model-client run was performed for this cleanup.
 Host IDE tooling, unrelated worktrees/services and ignored historical evidence
 were preserved. Image and deployment/capacity release gates remain unexecuted.
+
+## Document MCP local evidence — 2026-10-11
+
+This milestone adds independent `document-query`, not a Source Query session or
+source-preparation dependency. Local evidence is retained in
+`.superpowers/sdd/2026-10-11-document-mcp/`; actual test document Git objects are
+preserved there as private TEST_ONLY evidence, not formal publication.
+
+| Exercised gate | Observed result |
+| --- | --- |
+| Full ordinary reactor before bounded document-review fixes | 353 PASS: Model9, Indexer172, Source Query139, Document33 |
+| Final affected document ordinary suite | 35 PASS, including real10s HTTP timeout/lifetime and real512KiB search trimming |
+| Existing packaged Source/Relations journeys | 2 PASS on unchanged source runtime |
+| Final packaged Document journey | 1 PASS: exact bytes, updates/rejection, retained pins, withdrawal/restart and interrupted-owner reaping |
+| Scope-selector regressions | 53 PASS |
+
+The final35-test run supersedes the earlier33 document tests; this is not a claim
+that one355-test command was executed. It includes the final whole-branch
+publication-error normalization. The interrupted-teardown regression first failed
+with the actual `InterruptedException`, then passed after cleanup continued through
+interruption. Launcher cleanup was separately exercised with a live-ownership
+marker (retain work) and without one (remove owned work).
+
+The installed SDK2.0.0 ignores stateless `requestTimeout`; supported async SDK tool
+registration now uses an application-owned10s response boundary, two workers and
+no queued work. Actual query/materialization stays synchronous under its5s
+cooperative deadline. Real delayed HTTP calls established timeout responses while
+BUSY/read leases persisted until work actually unwound. This does not promise a
+forced filesystem kill or cancellation-notification interruption.
+
+Whole-branch review found that oversized candidate admission leaked the runtime
+`DOCUMENT_RESULT_TOO_LARGE` into a narrower publication-error enum. A real
+public-result regression failed before correction. Admission now reports
+`DOCUMENT_CAPACITY_EXCEEDED`; both real facade tools are checked against their
+actual advertised enums, last-good identities/content and matching text/structured
+results. The final35-test suite passed, and a fresh packaged HTTP/MCP smoke proved
+the same oversized-candidate fallback for search and exact read. Its owned child
+was reaped before its temporary root was removed.
+
+The full native and four selected Luna runs below predate only that narrow
+classification fix. They are retained evidence for unchanged paths, not relabeled
+final-binary executions. The earlier48-entry class/resource equivalence record
+applies before that final catalog fix; the affected final-binary fallback has its
+own actual wire proof.
+
+### Actual dual-MCP clients
+
+Codex CLI0.162.1 explicitly requested `gpt-6-luna`; provider-reported identity was
+not available and is not invented. Each isolated read-only client received only
+Document MCP and Source Query MCP, a neutral question, fixed source contexts and
+the query skill—no document body, old answer, local source, author trace, shell,
+web or expected formula/route. Indexer prepared three exact source memberships
+under durable UUID intents, then was stopped/reaped before clients. Query reported
+source READY, semantic NOT_READY and no repo-local guide hints.
+
+| Selected run | Independent verdict | Actual recovery |
+| --- | --- | --- |
+| `query-current-final` | PASS | None |
+| `query-historical-final` | PASS | None |
+| `query-no-hit-format-fix` | PASS | None |
+| `query-document-update` | PASS_WITH_RECOVERY | One SOURCE_BUSY; identical pinned search then succeeds |
+
+All selected claims were independently checked against their cited original
+source/document text, not just syntactically valid locators. Source contexts were
+`member-suite@fd5c17ed05ac4b7b9d254bb1209f176fe73cd3dc`,
+current `pricing-service@046560615284124d1513b2645d2d9dc056b88ba1`, and the requested
+historical `pricing-service@f5a207cfc2e8d34778ee537dac3f2655a4e7417e`.
+Document D1 was `90b5c5f184400cfd788820285eedcbc29b94309b`, empty navigation variant
+`485e586392796c0164a16d1b28b07afa433e0ce8`, and D2
+`d0da971f5396f8a5c41517ba79bf7d9a34ba7f96`. D2 restores the same four original
+generated document bodies after the empty-catalog variant. Actual MCP traffic
+proved new search D2 while a retained old hit/read/cursor remained D1; source pins
+did not change.
+
+Six earlier attempts remain failed/rejected: `baseline-old-skill`, `query-current`,
+`query-historical`, `query-no-hit`, `query-no-hit-final`,
+`query-no-hit-candidate-fix`. Their defects included skipped full-document reads,
+incomplete catalog discovery, shortened document SHAs, unsupported destination
+attribution despite a later disclaimer, and relative Markdown citation links.
+The audit was corrected to detect malformed-length SHAs rather than silently
+matching only valid40-hex citations. Generic query-skill rules were strengthened;
+new independent runs replaced failed selections without editing their answers.
+This is not same-answer citation recovery. All raw calls, structured errors,
+failed statuses, answers, prompts and requested-model invocations remain retained.
+The CLI's experimental-feature warning is recorded separately from MCP failures.
+
+### Resource and release limits
+
+One serial lane used Java21, cached Maven3.9.6, Maven384MiB and test JVM256–384MiB
+heaps, CPU count2, and owned disposable roots. Initial Linux available memory was
+19,785MiB/backing-host17,689,052KiB; before final teardown verification it was
+17,862MiB/backing-host16,283,852KiB, with zero swap used.
+Selected dual-MCP runs sampled up to674144KiB combined RSS for both read services,
+the client and observed descendants at250ms intervals. That is about0.64GiB for
+these small fixtures—not full-host peak, production sizing, worst-case catalog
+capacity or a hard bound between samples.
+
+Task reviews and whole-branch final review have no open findings after the
+publication-classification correction. Independent selected-agent evidence gate
+is PASS_WITH_RECOVERY. Owned test processes and runtime roots are cleaned; private
+test objects/raw evidence and the user worktree are retained.
+No Docker/images/CI, formal document approval/publication,
+existing-service mutation, project commit/merge/push or deployment-capacity
+acceptance was performed. Both existing Dockerfiles only gain the reactor POM
+copy; there is no document image.
 
 ## Release checks and boundaries
 

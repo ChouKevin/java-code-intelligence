@@ -4,6 +4,7 @@ COPY pom.xml ./
 COPY semantic-model/pom.xml semantic-model/pom.xml
 COPY semantic-indexer/pom.xml semantic-indexer/pom.xml
 COPY semantic-query/pom.xml semantic-query/pom.xml
+COPY document-query/pom.xml document-query/pom.xml
 RUN mvn --batch-mode --no-transfer-progress -pl semantic-query -am dependency:go-offline
 COPY semantic-model semantic-model
 COPY semantic-query semantic-query

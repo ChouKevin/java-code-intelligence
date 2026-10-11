@@ -515,6 +515,29 @@ the validation of the cursor's actual raw position and selected windows.
 
 `SourceResult` has no top-level continuous `content` alias. It reports exact context/path, `blobId`, `contentDigest`, `byteLength`, requested/effective view and selection, `summaryOutcome`, optional `indexGeneration`/`profile`, ordered `segments`, `hasMore`, `nextCursor` and `stopReason`. A `SOURCE` segment carries lossless original text and its exact half-open UTF-8 byte and one-based LF line span, plus mid-line flags. An `ELISION` segment carries the omitted original span, `foldKind` and `declarationId`, but no source content. Selection gaps are not elisions; intentional folding does not itself mean another page exists. Each page has at most 500 segments, at most 65,536 source-content bytes and the requested `maxLines`; full HTTP/MCP serialization is at most 512 KiB. `stopReason` distinguishes completion from line/content/segment/wire budgets. Cursor continuation pins the same source digest, request/view/effective selection and generation; it never changes an auto-selected raw view or summary generation.
 
+Successful MCP `read_source` now uses a model-facing numbered text presentation,
+not a duplicate JSON string. HTTP responses and MCP `structuredContent` remain the
+same `SourceResult`, including original Unicode/CRLF content and exact digests,
+byte spans, selection, generation/profile and cursors. Consumers parsing
+`content[0].text` as JSON must instead use `structuredContent`; other tools and
+all error results retain their JSON text form.
+
+The display names the exact repository/revision/path, provides per-segment source
+locators and byte bounds, and prefixes source rows with their original one-based
+LF line number. Empty lines count; a terminal LF creates no extra row. Separate
+ranges retain separate coordinates; continued partial lines keep their original
+line number and explicit mid-line flags. ELISION marks unread bytes rather than
+inventing method bodies. Display escapes for control characters and all labels
+are presentation only, never original source bytes. Page/view/provenance metadata
+and nextCursor remain available to text-only clients.
+
+Numbered presentation and raw structured data are both included in actual MCP
+response budgeting. The reader reduces a page and continues when necessary;
+it does not truncate evidence or strip metadata to fit. HTTP/MCP structured
+parity remains, although pagination boundaries can change with the wire budget.
+Numbering lowers citation-location effort but does not prove an agent copied a
+path correctly or that an attached passage supports its claim.
+
 `search_text` remains single-line, literal, case-sensitive (maximum 256 Unicode code points), with optional narrowing `directory`/`filePattern`; it has no regex or continuation cursor. If `truncated=true`/`scanComplete=false`, narrow the query/path and do not claim absence. It shares at most two concurrent permits and a 5s deadline; list/read keep their 2s deadline. Search columns are one-based UTF-16 code units.
 
 `filePattern` matches repository-relative paths; `directory` narrows that same scope and does not rebase the glob. For example, directory `src` with pattern `src/*.java` searches Java files directly under `src`. Line coordinates count original LF bytes: LF belongs to the line it ends, a final LF creates no fictitious line, an empty file has no content lines, and final bytes without LF are still one line. A selector beyond EOF yields an empty effective selection with no fabricated citation span; `tailLines` selects the last N existing lines (or the whole file when shorter).
@@ -530,6 +553,24 @@ the rejected cursor.
 Business-discovery `list_repositories` also has a 160 KiB complete application-response budget (HTTP/MCP transport: 512 KiB). Pages contain whole items and may end before `limit`; cursors bind the unchanged request and registry digest. If one item alone exceeds the application budget, `SOURCE_RESULT_TOO_LARGE` is HTTP 413 / the equivalent safe MCP error. A valid hint update/removal changes that digest, so discard old list cursors and restart discovery from page one.
 
 Only tracked regular supported text at the pinned commit is readable. The same policy excludes `.git`, `target`, `build`, `.gradle`, `node_modules`, `generated` at any depth and `*.class`; direct read cannot bypass it. Symlinks are not followed, submodules are not initialized, binary/unsupported encoding/path/LFS pointers are explicitly unsupported; no filters, hooks, LFS hydration or build scripts execute. A guide optionally committed at configured `project-guide-path` is `AVAILABLE`, `MISSING`, `INVALID` or `DISABLED`, always `freshness: NOT_VERIFIED` if represented. It is a navigation hint, not verified business truth, and its absence never blocks source readiness. See the [external authoring prompt](repository-context-prompt.md).
+
+A [module-aware guide](repository-context-prompt.md#module-aware-guide-mvp) may
+describe application/library modules, business lookup starts and candidate
+relationships. Its module IDs and relation labels are ordinary Markdown, not new
+MCP parameters or indexed facts. For an existing repo-local guide, Query returns
+the file at the selected source SHA; source evidence on each side remains independently
+pinned. No parser/index is required, and existing token/allowlist/containment/admin
+boundaries remain unchanged.
+
+The new [central document handoff](repository-context-prompt.md#central-document-handoff)
+is external to this source-publication mechanism. An author directly reads approved
+exact local Git source, stages private drafts, and hands exact human-reviewed content
+to a separately authorized central Git document repository. This does not change the
+MCP catalog, require business-repo commits/prepare, or publish navigation-hint settings.
+Document Git revisions are distinct from business-source SHAs; query requests retain
+the latter. Future Elasticsearch and external document MCP search/read consume approved
+document versions independently; they are not implemented or connected by this service.
+Failed or pending document refresh leaves the last approved version unchanged.
 
 
 ## Prepare and navigate the Java index

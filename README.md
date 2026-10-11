@@ -1,6 +1,6 @@
-# Java Code Intelligence — Source MCP
+# Java Code Intelligence — Source and Document MCP
 
-A source-first service for traceable evidence from an approved Git repository at an **exact commit**, with optional Java syntax and static-relation indexes. Java 21 and three modules remain: `semantic-indexer` privately fetches Git, publishes immutable source and builds separate sealed SQLite generations; `semantic-query` reads only published source/index through HTTP/MCP and real ripgrep; `semantic-model` contains JDK-only contracts. JavaParser and its optional Symbol Solver run only in Indexer. Neither service runs an LLM, MongoDB, target-repository builds or business inference. The preceding MCP reading/default-branch-current milestone was locally verified: 248 ordinary tests, the packaged native journey and an actual Codex/MCP reading/citation scenario passed. See [historical evidence and release limits](docs/operations/testing.md#mcp-reading-and-current-local-evidence--2026-10-09). Relations acceptance is tracked separately in the [roadmap](docs/roadmap.md#phase-4--relations); prior results do not constitute Relations or release acceptance.
+A source-first service for traceable evidence from an approved Git repository at an **exact commit**, with optional Java syntax and static-relation indexes. Java21 and four modules: `semantic-indexer` privately fetches Git, publishes immutable source and builds separate sealed SQLite generations; `semantic-query` reads only published source/index through HTTP/MCP and real ripgrep; `semantic-model` contains JDK-only contracts; independent `document-query` serves pregenerated central-Git navigation through a separate read-only MCP. JavaParser and its optional Symbol Solver run only in Indexer. No service runs an LLM, MongoDB, target-repository builds or business inference. The preceding MCP reading/default-branch-current milestone was locally verified:248 ordinary tests, the packaged native journey and an actual Codex/MCP reading/citation scenario passed. See [historical evidence and release limits](docs/operations/testing.md#mcp-reading-and-current-local-evidence--2026-10-09). Relations acceptance is tracked separately in the [roadmap](docs/roadmap.md#phase-4--relations); prior results do not constitute Document MCP, Relations or release acceptance.
 
 The corrected query skill also delivered every checked repository/exact-SHA
 identity in all six final answers. The first-round omission and its fresh
@@ -24,19 +24,38 @@ operations guide into an authorized exact-revision workflow, distinguishes synta
 from opt-in Relations, and requires Query-only acceptance. It does not authorize
 automatic downloads, target builds, existing-service restarts or description approval.
 
-For agent-assisted repository descriptions, read
-[describe-repository](skills/describe-repository/SKILL.md). It drafts a
-human-reviewed business summary, Chinese/English keywords, example questions and
-exact-revision source citations. Real drafts default to
-`.local/repository-descriptions/<repositoryId>.md`; they remain `DRAFT` /
-`NOT_VERIFIED` and are not automatically imported, registered or published.
-Publishing an approved hint requires explicit human approval of its exact content
-and analyzed revision, separately authorized Indexer external-configuration
-changes and an explicit Indexer start/restart; see
-[business-discovery operations](docs/operations/source-mcp.md#optional-human-reviewed-business-discovery-hint).
+For agent-assisted repository descriptions and pregenerated navigation, read
+[describe-repository](skills/describe-repository/SKILL.md). The author may read an
+approved local project's exact tracked Git blobs directly; MCP publication,
+JavaParser indexing and target builds are not prerequisites. Real drafts stage in
+`.local/repository-descriptions/<repositoryId>.md` and
+`<repositoryId>-module-guide.md`, retaining `DRAFT` / `NOT_VERIFIED`.
 
-For questions about implemented business rules, calculations, eligibility or
-upgrade conditions, features, or service flows, read the separate
+The [central document handoff](docs/operations/repository-context-prompt.md#central-document-handoff)
+uses a separate Git document repository for human-reviewed versions. Every update
+requires approval of its exact content and analyzed source revisions, plus separate
+publication authority; no business-repo commit or `prepare_source` is required.
+Latest approved navigation remains available while an explicit per-repo refresh is
+pending or fails. [Document MCP](docs/operations/document-mcp.md) now reads this
+independent Git catalog through `search_documents` and full `read_document`.
+New searches use active; retained exact document reads/continuations stay pinned.
+Elasticsearch remains future work. Document commits and business-source SHAs are
+independent; TEST_ONLY fixture permission never becomes formal approval.
+
+The existing [module-aware template](docs/operations/repository-context-prompt.md#module-aware-guide-mvp)
+contains repo/module navigation, evidence-backed business lookup starts and
+cross-repo clues. It is not a complete business-answer database or deployment
+proof. Query agents use documents to prioritize source investigation, then expand
+when evidence is missing; full source citations still use exact repo/SHA/path/lines.
+The internal-reader scope adds no differential ACL or relationship graph.
+
+Existing optional [business-discovery hints](docs/operations/source-mcp.md#optional-human-reviewed-business-discovery-hint)
+still require separately authorized Indexer configuration publication, and
+repo-local `project-guide-path` remains readable through source tools. Neither is
+the central document publishing mechanism; drafting alone changes neither service.
+
+For read-only questions about module responsibilities, build dependencies, business
+rules, calculations, eligibility, features or service flows, read the separate
 [query-business-code](skills/query-business-code/SKILL.md) skill. It applies
 beyond VIP questions and uses source evidence, not the hint text. Use
 `describe-repository` to author a description; use `query-business-code` to
@@ -103,11 +122,19 @@ codes and recovery are in [capacity admission](docs/operations/source-mcp.md#app
 
 ## Interfaces
 
-Every HTTP and `/mcp` call requires `X-Api-Token`: `SEMANTIC_INDEXER_ADMIN_TOKEN` for private preparation, `SEMANTIC_QUERY_API_TOKEN` for reading. HTTP and MCP share input validation, results and safe errors.
+Indexer/Source Query application calls require `X-Api-Token`: `SEMANTIC_INDEXER_ADMIN_TOKEN` for private preparation, `SEMANTIC_QUERY_API_TOKEN` for source reading. Their HTTP and MCP surfaces share input validation, results and safe errors.
 
 Query MCP uses an initialized Streamable HTTP session per client; retain the
 server-issued session ID for calls and cancellation, then close the session.
 See the [MCP session lifecycle](docs/operations/source-mcp.md#mcp-session-lifecycle).
+
+Document MCP is a separate **stateless** `/mcp` server with only
+`search_documents` and `read_document`, authenticated by its own
+`DOCUMENT_QUERY_API_TOKEN` through `X-Api-Token`. It has no business REST API or
+publisher API. Register both read MCPs in the querying client and load the query
+skill; document snippets guide discovery, full documents preserve qualifications,
+and exact Source Query reads support business conclusions. Document citations use
+`documentRepo@fullDocumentCommit:path#L<sectionStartLine>`, never a source context.
 
 | Indexer MCP | Private HTTP |
 | --- | --- |
@@ -155,6 +182,15 @@ Read cursors are authenticated and valid only within their issuing Query process
 After restart, keep the exact context and retained generation pin but start a new
 read; old or modified tokens return `INVALID_ARGUMENT`, never a different view.
 
+Successful MCP `read_source` text content is a numbered display: exact
+repository/SHA/path locators, original LF line labels, explicit elisions and
+partial-line flags. It is not JSON and its display labels/escapes are not source
+bytes. HTTP JSON and MCP `structuredContent` retain the same lossless source
+segments, provenance and cursor contract. Machine consumers must use those
+structured fields, not parse display text as JSON or source. The 512 KiB MCP
+budget includes both forms; numbered output aids citation but does not validate
+a model's final claims or citations.
+
 
 ## Development and evidence
 
@@ -162,6 +198,7 @@ read; old or modified tokens return `INVALID_ARGUMENT`, never a different view.
 | --- | --- |
 | Git registry, durable source/index jobs, exact export, atomic source/index publication | `semantic-indexer/` |
 | Published-only admission, bounded filesystem/ripgrep/SQLite reads, HTTP/MCP | `semantic-query/` |
+| Central Git navigation catalog, pinned document search/read, independent stateless MCP | `document-query/` |
 | Exact source identity, generation/profile/coverage and framework-neutral contracts | `semantic-model/` |
 | Video source corpus; order/payment guide cases generated by the journey | `semantic-indexer/fixtures/uat/` |
 

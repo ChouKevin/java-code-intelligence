@@ -46,7 +46,7 @@ change() {
   expect "$name" "$unit" "$journey" "$images" --base "$base" --head HEAD
 }
 
-change docs-only false false false README.md AGENTS.md docs/operations/testing.md
+change docs-only false false false README.md AGENTS.md docs/operations/testing.md skills/query-business-code/SKILL.md
 change root-build true true true pom.xml
 change module-build true true true semantic-query/pom.xml
 change shared-model true true true semantic-model/src/main/java/Identity.java
@@ -71,6 +71,18 @@ change journey-launcher false true false scripts/test-source-mcp.sh
 change video-data false true false semantic-indexer/fixtures/uat/video-service/src/main/java/com/example/video/Video.java
 change images false false true Dockerfile.indexer Dockerfile.query .env.example scripts/test-source-images.sh
 change mixed true true false semantic-query/src/test/java/SearchTest.java scripts/test-source-mcp.sh
+change document-build true true true document-query/pom.xml
+change document-query true true false document-query/src/main/java/com/java/semantic/document/application/DocumentQueryService.java
+change document-unit true false false document-query/src/test/java/com/java/semantic/document/application/DocumentQueryBehaviorTest.java
+change document-journey false true false document-query/src/test/java/com/java/semantic/document/uat/DocumentMcpJourneyIT.java
+change document-launcher false true false scripts/test-document-mcp.sh
+change document-resources true true true document-query/src/main/resources/document-tools.json
+change document-bootstrap true true true document-query/src/main/java/com/java/semantic/document/DocumentQueryApplication.java
+change document-security true true true document-query/src/main/java/com/java/semantic/document/api/DocumentTokenFilter.java
+change document-publication true true true document-query/src/main/java/com/java/semantic/document/catalog/DocumentCatalog.java
+change document-git-admission true true true document-query/src/main/java/com/java/semantic/document/catalog/GitDocumentLoader.java
+change document-http-boundary true true true document-query/src/main/java/com/java/semantic/document/api/DocumentHttpConfiguration.java
+change document-mcp-bootstrap true true true document-query/src/main/java/com/java/semantic/document/mcp/DocumentMcpConfiguration.java
 change unknown-path true true true new-surface/unknown.txt
 change hostile-doc-name false false false $'docs/space tab\tand\nnewline.md'
 change hostile-unknown-name true true true $'-hostile $(touch compromised)\nunknown'

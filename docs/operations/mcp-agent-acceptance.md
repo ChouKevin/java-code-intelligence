@@ -1,4 +1,4 @@
-# Source／index MCP Agent 接受測試
+# Source／index／document MCP Agent 接受測試
 
 本文件區分 native 測試、真實獨立程序／容器、實際 OMP/Codex/Claude 模型客戶端與部署安全。**不能**以其中一層代替另一層；MCP 回傳可追溯來源、syntax 宣告及可選 static Relations，不產生已驗證業務推論、runtime call graph 或 finding。最新結果與未執行 gates 見 [testing](testing.md)。Query 不使用 Mongo、Git、JavaParser 或服務端模型。
 
@@ -14,6 +14,236 @@ Query MCP 客戶端須各自 initialize Streamable HTTP session，保存 server-
 clients 同時使用相同 JSON-RPC request ID 都能成功；取消只影響所屬 session，
 不影響另一 client，且 owner cancellation 後子程序被回收、後續搜尋仍可用。
 完整生命週期見 [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle)。
+
+## Independent Document MCP acceptance
+
+Use the separate [Document MCP](document-mcp.md) together with Source Query.
+Its stateless `/mcp` has its own read token and exactly `search_documents` and
+`read_document`; it does not reuse Source Query's session or expose Indexer.
+Run `bash scripts/test-document-mcp.sh` for actual packaged-process publication,
+retention, restart and raw Git-byte proof. Keep that native result separate from
+the external-agent gate below.
+
+- Reuse the actual audited generated sample drafts in a new private TEST_ONLY
+  central Git fixture. Preserve their bytes/digests and actual DRAFT status;
+  publication envelopes attach real document commits without rewriting source
+  identities or claiming human approval. Do not replace the drafts with an
+  answer-shaped oracle.
+- Explicitly invoke `gpt-6-luna` with only Document MCP and Source Query MCP.
+  Supply a neutral business question, independently selected source contexts and
+  the query skill. No preloaded document bodies, author trace, local-source tools,
+  answer key or preparation credentials. Record the client/version, invocation,
+  both complete MCP traces, raw answer and requested versus observed model identity.
+- Current case: observe document search, exact full-document read and actual
+  Source Query navigation/raw reads. Audit formula, eligibility, module/entry
+  distinctions and both sides of candidate relationships against exact source.
+- Historical case: active documents may analyze newer source; every source call
+  must retain the user's per-repo historical pin. Document/source comparison does
+  not authorize source reads at the document's analyzed SHA.
+- Thin/no-hit case: a separately identified sparse/empty catalog must cause
+  source discovery and investigation to expand, not a claim that the rule/repo
+  does not exist. Complete the unfiltered paginated repository list and distinguish
+  investigated, unavailable and unread scopes.
+- Document-update case: observe a new actual active document commit with unchanged
+  independent source pins. Search/read responses and final document citations must
+  use coherent document identities. Native proof additionally covers retained D1
+  cursors/reads after D2, invalid D3 preservation, withdrawal and restart.
+- Audit document citations as `documentRepo@fullDocumentSHA:path#L<sectionStartLine>`
+  against actually read Git bytes and real original section boundaries. Source
+  citations remain `sourceRepo@fullSourceSHA:path:Lstart-Lend`. Check semantic
+  support separately from identifier/range validity; snippets are not full reads.
+  Inspect JSON-RPC errors, tool `isError`, item status and any recovered failures,
+  not merely an outer null error. Preserve original failures and explicit same-claim
+  corrections; the controller never rewrites an answer to manufacture a pass.
+
+The current immutable-catalog/tool schemas are independent of Source OpenAPI.
+No ES ingestion, real business-document approval/publication, image/CI execution,
+production TLS/capacity or project commit/merge/push is established by these tests.
+
+
+## Centralized pregenerated navigation acceptance (prospective)
+
+This earlier generation-to-query contract describes local named-document delivery,
+not the independent Document MCP gate above or Elasticsearch acceptance. It follows
+[Central document handoff](repository-context-prompt.md#central-document-handoff)
+and the [query skill](../../skills/query-business-code/SKILL.md). The existing
+source API, optional `navigationHint` and repo-local `projectGuide` remain unchanged.
+The historical scenarios and observed results below remain historical evidence;
+their failures are not retroactively promoted under the recovery rubric.
+
+### Role isolation and exact inputs
+
+1. The controller selects actual approved source SHAs from owned fixture manifests
+   and Git history, using the existing member-suite/pricing-service fixtures and
+   source-only/no-index service facilities. An independent author receives a
+   neutral generation brief, approved clone/exact tracked Git blobs, allowed
+   paths/types and draft destination—not previous guides, answers or oracle traces.
+   Record author client/model, invocation, actual read/unread scope, unedited output
+   bytes and citations. No target build/execution, dirty/untracked-source mixing,
+   implicit fetch or business-repo writes are authorized by generation.
+2. Audit the real draft against exact Git blobs for valid identities/lines and
+   semantic support, sensitive content, module distinctions and unknown endpoints.
+   Preserve original and revised drafts separately. Drafts are DRAFT/NOT_VERIFIED;
+   design approval is not human approval of output. Formal publication of each
+   update requires human approval of exact content/analyzed revisions and separate
+   publication authority. The user has authorized direct test-only use of the owned
+   member-suite/pricing-service examples and generated drafts without per-draft
+   human review; record that fixture scope, not APPROVED status. Source/citation
+   audits still apply. See [fixture test authorization](repository-context-prompt.md#已授權的範例測試用途).
+   Central commit/push is not source preparation; unreviewed/failed refresh must
+   not replace the last formally approved document.
+3. Invoke fresh independent current and historical query clients explicitly with
+   `gpt-6-luna`. Record client/version, selected model, full invocation and runtime
+   provenance; do not infer provider-reported model identity. If unavailable,
+   report that gate blocked and obtain approval before substituting. Give the
+   query agent only named generated-document inputs plus Query MCP read access:
+   no local business source, author trace, answer key/oracle or Indexer credentials.
+   Local delivery is explicitly a document-input mechanism, not a fake external MCP.
+   Preserve the exact delivered bytes, byte length and content digest, input names
+   and delivery envelope, complete MCP text/structured trace and unedited answers.
+4. Distinguish each central document's repo/full document commit/path/section from
+   its analyzed business repo/full SHA and all cross-repo source contexts. Delivery
+   attaches a real document commit after commit, never a self-hash in Markdown.
+   Uncommitted synthetic inputs have a name and actual content digest, no invented
+   commit or APPROVED/publication status. Source calls always use the independently
+   selected business context, never document commit or analyzedRevision as a
+   substitute for the user's selected revision.
+
+### Required query cases
+
+- **Generated navigation / current source:** use the real audited author output
+  as an explicitly labeled draft test input if not human-approved. The client
+  completes the unfiltered paginated authorized repo catalog, investigates hinted
+  candidates first and pins only actually investigated repos. It checks build
+  descriptors, declared entries and business-source starts through MCP, distinguishes
+  aggregator/application/library from deployed service, and supports its answer
+  with exact source rather than document assertions.
+- **Historical source:** a separate fresh session uses each requested exact
+  historical context, even if the delivered document analyzed newer source.
+  Missing/renamed document paths trigger list/search at that historical SHA, not
+  current substitution or prepare. Unequal document/source SHAs alone are not
+  evidence of a behavioral conflict. Document/source comparison reads the document
+  side as document content, not as permission to query its analyzed source revision;
+  citation repair cannot expand the selected source contexts. Unavailable exact
+  source is reported, not silently replaced.
+- **Thin/omitted navigation:** use a separately labeled input, preserving the
+  original author output. Missing evidence expands investigation within the full
+  authorized catalog, including unhinted candidates; do not context-check or
+  deeply read every repo upfront merely to satisfy complete discovery. Record all
+  investigated repo/SHA pairs (including no-hit repos), uninvestigated catalog
+  entries and actual unread scope.
+- **Actual discrepancy / unavailable other side:** compare a real document claim
+  to pinned MCP source, or expose an actually unavailable target side. Expansion
+  follows contradictions and cross-repo clues; a known target is independently
+  pinned, an unknown target remains unknown. Quote the precise document claim and
+  raw source evidence; keep HTTP/event/name matching CANDIDATE and missing runtime
+  wiring explicit. Do not force matching versions or manufacture source evidence.
+
+### Handoff and answer audit
+
+For each independently delivered section, inspect its document identity/section
+locator, primary source context, required header/context rows, referenced Evidence
+rows including cross-repo contexts, qualifications and unread scope. Snippets alone
+are insufficient; full-section delivery must pin one document version and preserve
+tables/evidence associations. Record exact review status/approval basis and actual
+publication status independently of NOT_VERIFIED trust. Only approved versions
+are eligible for future formal indexing; record that future gate as unexecuted
+unless exercised, not as a live service supplied by this test.
+
+Audit every claim on separate dimensions:
+
+| Dimension | Required evidence |
+| --- | --- |
+| Identity/read validity | Actual MCP source context/full SHA/path/original LF lines and bytes, or actual document identity/digest/section; passage was read. |
+| Claim support | Attached passage supports the neighboring claim; guide/source comparison cites both sides and cross-repo claims cite each inspected side. |
+| Recovery | Explicit withdrawal and replacement attached to the same claim, with valid read/support evidence; preserve both citations and raw output. |
+
+`PASS` requires valid identities and supported conclusions with no citation
+recovery. `PASS_WITH_RECOVERY` permits an agent's explicit correction of the same
+claim: retain the bad citation, withdrawal, replacement citation and supporting
+read trace; disputed source ranges require exact-context raw-range verification.
+A later unrelated locator, a whole-file citation used to hide a misplaced range,
+an uncorrected false citation, wrong source revision, unsupported conclusion or
+controller-edited answer is `FAIL`, not recovery. A wrong-revision answer cannot
+pass merely by adding a citation to some other version. A genuinely withdrawn
+claim is recorded as narrowed/unknown, not a successfully proven original claim.
+
+Controller Git-byte/line and semantic-support audits remain independent of model
+output. Nonempty generated Markdown, model assertions, exit zero and link checks
+cannot establish source-grounded correctness. Keep generation, handoff contract,
+MCP code verification, human content approval, actual central publication,
+external search integration and image/CI/deployment/capacity statuses separate.
+Record tool/read/time measurements and the scope of any memory samples without
+claiming performance improvement. Written cases are not executed acceptance;
+preserve previous failures and do not edit/relabel historical model answers.
+
+## Module-aware guide acceptance
+
+This earlier scenario exercises the optional repo-local guide capability, not a
+requirement to publish centralized documents through business source. Its original
+criteria/results remain historical evidence. It assumes all internal readers can
+read both fixture repos and all modules, adds no permission partitioning or new
+MCP/API/index contract, and keeps Query-only credentials separate from preparation.
+
+Use two owned synthetic Git repositories. One contains a parent aggregator, two
+application modules with separate real entry methods and one common library;
+both module build descriptors declare their library dependency. The other has an
+HTTP endpoint. One caller uses a matching method/path but requires a base-URL
+property whose deployed value is not supplied. Guides follow the
+[module-aware template](repository-context-prompt.md#module-aware-guide-mvp);
+retain a guide describing an older endpoint after changing the actual source.
+Target programs are readable inputs, not business builds to execute.
+
+1. Publish source-only revisions through the existing private operator flow,
+   including the retained old endpoint revision and the new current revision.
+   No semantic index is required. Save actual per-repo SHAs and source receipts;
+   do not invent a cross-repo single SHA or make an index a guide prerequisite.
+2. With Indexer stopped, explicitly invoke fresh `gpt-6-luna` clients with only
+   Query MCP and no local fixture/oracle tools. Load the module-aware query skill.
+   Preserve unfiltered, fully paginated repository discovery and independent exact
+   contexts; read guides via the published paths, then actual descriptors, entry
+   methods, caller, endpoint and relevant non-secret configuration source.
+3. For current member/current endpoint contexts, the answer must distinguish
+   aggregator, two application entries and the library, cite both build dependency
+   declarations, and locate the HTTP caller in the correct module. It must
+   identify the actual guide/source endpoint conflict, not declare staleness from
+   unequal SHAs alone. Matching source routes are candidates, not proof of a
+   deployed connection while the base URL is unknown.
+4. In a separate fresh invocation, pin the same caller repo to its selected SHA
+   and the endpoint repo to the retained old SHA. The caller and endpoint paths
+   differ in this pair; do not switch the endpoint to current to force a match.
+   Cite each side's actual version and distinguish this mismatch from deployment
+   uncertainty. Earlier guide-only commits with unchanged code are not by
+   themselves a behavioral conflict.
+5. Verify every cited path/line and raw byte span against its exact Git source.
+   Answers must list both checked repo/SHA identities, separate source-declared
+   dependencies from human descriptions/candidates, and retain unread/runtime
+   limitations. Do not infer worker HTTP calls merely because its sibling makes
+   one or infer an absent relationship solely from a partial search.
+6. Audit claim-to-citation support separately from valid identities/ranges:
+   every attached passage must actually support its neighboring claim. Guide
+   analysis identities, relationship rows, human notes and discrepancies require
+   exact guide citations too; a guide/source comparison cites both sides, using
+   each guide's containing context rather than its embedded analyzed revision.
+   For disputed guide/source or cross-version claims, the trace must include
+   explicit raw-range verification of the intended evidence before delivery.
+   If an intended range misses the relevant row, the client must locate/read the
+   correct range and attach it to the claim, or narrow the claim to what is known.
+   A later unrelated citation or a whole-file citation does not repair the
+   attachment. Preserve failed answers; never manually repair a model answer
+   and count it as agent acceptance.
+7. For numbered `read_source` presentation, retain the actual MCP text as well as
+   `structuredContent` in the model trace. Confirm model-visible rows/locators use
+   the original source identity and LF positions; never replace the raw structured
+   body with numbered display text in byte/digest audits. Check explicit
+   elisions/partial lines and page metadata separately. Numbered output alone
+   does not waive either citation check or guarantee that the final answer
+   preserves the returned path.
+
+Record actual invocations, complete MCP traces, answers, source/guide snapshots,
+runtime identity and root audits locally. Written scenarios, fixture generation,
+link checks and static review are not executed MCP/model acceptance. No image/CI,
+target build, full graph completeness or actual deployed traffic is implied.
 
 ## Agent-operated onboarding acceptance
 
@@ -89,9 +319,13 @@ scope are in [testing](testing.md#repository-onboarding-local-evidence--2026-10-
 ## Repository business-discovery acceptance
 
 Local native and actual Codex/MCP source-only verification completed on
-2026-10-09. The checks below define the contract; observed outcomes and limits
-follow them and are recorded in [testing](testing.md#repository-business-discovery-local-evidence--2026-10-09).
-Historical Phase 3 counts are not reused as business-discovery evidence.
+2026-10-09. The checks below preserve that historical scenario's criteria; observed
+outcomes and limits follow them and are recorded in
+[testing](testing.md#repository-business-discovery-local-evidence--2026-10-09).
+Historical Phase 3 counts are not reused as business-discovery evidence. The new
+prospective contract above retains complete discovery but acquires contexts only
+for investigated repositories; it does not require repeating this scenario's
+all-nine-context investigation by default.
 
 The first round exposed a delivery gap: five current-B answers omitted the six
 non-answer repo/SHA pairs. The general skill was corrected and a fresh second

@@ -144,7 +144,12 @@ class HttpMcpParityTest {
                 McpSchema.CallToolRequest.builder(operation).arguments(input).build());
         JsonNode httpJson = mapper.readTree(payload);
         assertThat(httpJson).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcp.structuredContent())));
-        assertThat(mapper.readTree(((McpSchema.TextContent) mcp.content().getFirst()).text())).isEqualTo(httpJson);
+        String text = ((McpSchema.TextContent) mcp.content().getFirst()).text();
+        if (operation.equals("read_source") && !expectedError) {
+            assertThat(text).contains(SourceFilesystemFixture.SHA, "src/Order.java", "1 | class Order");
+        } else {
+            assertThat(mapper.readTree(text)).isEqualTo(httpJson);
+        }
         assertThat(mcp.isError()).isEqualTo(expectedError);
         if (expectedCode != null) assertThat(httpJson.get("code").asString()).isEqualTo(expectedCode); // cs-allow
         assertThat(payload).doesNotContain("/published/", "password", "source-admin");

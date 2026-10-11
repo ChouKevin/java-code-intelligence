@@ -36,11 +36,15 @@ if ! git diff --no-ext-diff --no-textconv --no-renames --name-only -z "$base" "$
 fi
 while IFS= read -r -d '' path; do
   case "$path" in
-    README.md|AGENTS.md|docs/*) ;;
-    pom.xml|semantic-model/*|semantic-indexer/pom.xml|semantic-query/pom.xml|.github/*|scripts/verification-scope.sh|scripts/test-verification-scope.sh)
+    README.md|AGENTS.md|docs/*|skills/*.md) ;;
+    pom.xml|semantic-model/*|semantic-indexer/pom.xml|semantic-query/pom.xml|document-query/pom.xml|.github/*|scripts/verification-scope.sh|scripts/test-verification-scope.sh)
       unit=true journey=true images=true ;;
     semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java|semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceRelationsJourneyIT.java|semantic-indexer/src/test/java/com/java/semantic/indexer/uat/NativeJourneySupport.java|scripts/test-source-mcp.sh|semantic-indexer/fixtures/uat/video-service/*)
       journey=true ;;
+    document-query/src/test/java/com/java/semantic/document/uat/DocumentMcpJourneyIT.java|scripts/test-document-mcp.sh)
+      journey=true ;;
+    document-query/src/main/resources/*|document-query/src/main/java/com/java/semantic/document/DocumentQueryApplication.java|document-query/src/main/java/com/java/semantic/document/catalog/DocumentCatalog.java|document-query/src/main/java/com/java/semantic/document/catalog/GitDocumentLoader.java|document-query/src/main/java/com/java/semantic/document/api/DocumentHttpConfiguration.java|document-query/src/main/java/com/java/semantic/document/mcp/DocumentMcpConfiguration.java)
+      unit=true journey=true images=true ;;
     */src/main/java/*/ApprovedOriginBinding.java|*/src/main/java/*/IndexJobStartupRecovery.java)
       unit=true journey=true images=true ;;
     semantic-indexer/src/main/resources/*|semantic-query/src/main/resources/*|*/src/main/java/*/config/*|*/src/main/java/*/SemanticIndexerApplication.java|*/src/main/java/*/SemanticQueryApplication.java|*/src/main/java/*Security*.java|*/src/main/java/*TokenFilter.java|*/src/main/java/*/SourcePathResolver.java|*/src/main/java/*/LocalSourceRevisionCatalog.java)
@@ -48,9 +52,9 @@ while IFS= read -r -d '' path; do
     semantic-indexer/src/main/java/com/java/semantic/indexer/index/*|semantic-query/src/main/java/com/java/semantic/query/index/*)
       # Parser/profile, SQLite/JNI and immutable publication/read paths affect images.
       unit=true journey=true images=true ;;
-    semantic-indexer/src/main/java/*.java|semantic-query/src/main/java/*.java)
+    semantic-indexer/src/main/java/*.java|semantic-query/src/main/java/*.java|document-query/src/main/java/*.java)
       unit=true journey=true ;;
-    semantic-indexer/src/test/*|semantic-query/src/test/*)
+    semantic-indexer/src/test/*|semantic-query/src/test/*|document-query/src/test/*)
       unit=true ;;
     Dockerfile.indexer|Dockerfile.query|.env.example|scripts/test-source-images.sh)
       images=true ;;

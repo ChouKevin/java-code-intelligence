@@ -495,7 +495,21 @@ class SourceRelationsJourneyIT {
         McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(tool, arguments));
         assertThat(result.isError()).as(tool + ": " + result).isFalse();
         JsonNode structured = mapper.valueToTree(result.structuredContent());
-        assertThat(mapper.readTree(((McpSchema.TextContent) result.content().getFirst()).text())).isEqualTo(structured);
+        String text = ((McpSchema.TextContent) result.content().getFirst()).text();
+        if (tool.equals("read_source")) {
+            assertThat(text).doesNotStartWith("{")
+                    .contains(structured.get("context").get("repositoryId").asString(),
+                            structured.get("context").get("revision").asString(), structured.get("path").asString());
+            for (JsonNode segment : structured.get("segments")) {
+                if (segment.get("kind").asString().equals("SOURCE")) {
+                    assertThat(text).contains(segment.get("startLine").asInt() + " | ");
+                } else {
+                    assertThat(text).contains("unread");
+                }
+            }
+        } else {
+            assertThat(mapper.readTree(text)).isEqualTo(structured);
+        }
         assertThat(mapper.writeValueAsBytes(result).length).isLessThanOrEqualTo(524_288);
         if (tool.equals("find_relations")) assertThat(mapper.writeValueAsBytes(structured).length).isLessThanOrEqualTo(163_840);
         return structured;

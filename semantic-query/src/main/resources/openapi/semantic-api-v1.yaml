@@ -485,7 +485,7 @@
         "description": "Read one exact source path with view auto|raw|summary (default auto), one optional mutually exclusive selector (startLine, 1-20 inclusive ranges, or tailLines), and per-page maxLines (default 200, maximum 500). Raw and selector reads preserve the original bytes; unselected auto may choose an eligible Java structural summary, with effective view and safe summary outcome explicit. Summary has no selector, never silently falls back, and is bound to one optional indexGeneration. Responses contain canonical source/elision segments with blobId/contentDigest/byteLength provenance, half-open raw UTF-8 byte spans, original LF line ranges, and mid-line flags. A continuation cursor pins exact source, selection, effective view, profile/generation and page position; intentional elision is not a page continuation. Each page is bounded to 500 segments, 65536 source-content bytes, maxLines and 512 KiB complete HTTP/MCP serialized size. Use raw ranges to inspect elided method/constructor bodies before citing behavior.",
         "responses": {
           "200": {
-            "description": "Same application result as MCP structuredContent and JSON text content.",
+            "description": "Same lossless application result as MCP structuredContent. Successful MCP read_source text content is a numbered presentation, not JSON or source bytes; its display locators, line labels and escapes do not change this schema or the original segment content.",
             "content": {
               "application/json": {
                 "schema": {

@@ -236,9 +236,14 @@ call_query_mcp() {
   mcp_request "${query_url}" query-smoke-only "${query_session}" \
     "$(jq -nc --arg name "${tool}" --argjson arguments "${arguments}" \
       '{jsonrpc:"2.0",id:3,method:"tools/call",params:{name:$name,arguments:$arguments}}')"
-  jq -e '.result.isError == false and
-    .result.structuredContent == (.result.content[0].text | fromjson)' "${root}/mcp.json" >/dev/null \
-    || fail "MCP ${tool} failed or disagreed with text content"
+  jq -e --arg tool "${tool}" '.result as $result |
+    $result.isError == false and
+    (if $tool == "read_source" then
+      ($result.content[0].text | contains("repositoryId=" + ($result.structuredContent.context.repositoryId | tojson))) and
+      ($result.content[0].text | contains("revision=" + ($result.structuredContent.context.revision | tojson))) and
+      ($result.content[0].text | contains("path=" + ($result.structuredContent.path | tojson)))
+    else $result.structuredContent == ($result.content[0].text | fromjson) end)' "${root}/mcp.json" >/dev/null \
+    || fail "MCP ${tool} failed or disagreed with its text presentation"
 }
 prepare_index() {
   local sha="$1" label="$2" request status phase=''
