@@ -1,6 +1,7 @@
 package com.java.semantic.document.uat;
 
 import com.java.semantic.document.support.DocumentFixture;
+import com.java.semantic.model.source.SourceContext;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("deployed-it")
 class DocumentMcpJourneyIT extends DocumentJourneySupport {
     @Test
-    void packagedStatelessServicePreservesExactDocumentsAcrossUpdatesWithdrawalAndRestart() throws Exception {
+    void packagedStatelessServiceIsolatesOwnersAndExpiresChangedScopesAcrossRestart() throws Exception {
         Path runRoot = Path.of(Objects.requireNonNull(System.getProperty("document.journey.root")));
         Path jar = Path.of(Objects.requireNonNull(System.getProperty("document.journey.jar")));
         Path work = Files.createDirectories(runRoot.resolve("work"));
@@ -38,8 +39,13 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
         String body = "# HIT A\r\n舊規則\r\n# HIT B\r\n尾端";
         try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
                 DocumentFixture fixture = new DocumentFixture(work.resolve("documents"))) {
-            first = fixture.commit(Map.of(DocumentFixture.GUIDE, body));
-            fixture.publish(first, first);
+            String bPath = "repositories/b/guide.md";
+            byte[] aBytes = body.getBytes(StandardCharsets.UTF_8);
+            byte[] bBytes = "# HIT B1\r\nB evidence\r\n# HIT More\r\nB continuation".getBytes(StandardCharsets.UTF_8);
+            first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, aBytes, bPath, bBytes),
+                    List.of(fixture.row(DocumentFixture.GUIDE, aBytes),
+                            fixture.row(bPath, bBytes, new SourceContext("b", DocumentFixture.SOURCE_REVISION))));
+            fixture.publish(Map.of("sample", first, "b", first));
             ObjectId firstBlob = Objects.requireNonNull(fixture.git.getRepository().resolve(first + ":" + DocumentFixture.GUIDE));
             byte[] original = fixture.git.getRepository().open(firstBlob).getBytes();
             try (OwnedService service = new OwnedService(jar, fixture, token, work.resolve("first.log"))) {
@@ -59,9 +65,14 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 JsonNode page = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
                 assertSuccess(page);
                 JsonNode pageData = page.path("structuredContent");
-                assertThat(pageData.path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
+                assertThat(pageData.path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
                 oldCursor = pageData.path("page").path("nextCursor").stringValue();
                 assertThat(pageData.path("items").get(0).path("section").path("startLine").intValue()).isEqualTo(1);
+                JsonNode bPage = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "b"));
+                assertSuccess(bPage);
+                String bCursor = bPage.path("structuredContent").path("page").path("nextCursor").stringValue();
+                JsonNode aPage = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "sample"));
+                String aCursor = aPage.path("structuredContent").path("page").path("nextCursor").stringValue();
                 JsonNode read = call(client, service.uri, token, "read_document", readArguments(first, 1));
                 assertSuccess(read);
                 JsonNode data = read.path("structuredContent");
@@ -74,26 +85,29 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 assertThat(data.path("collectionPurpose").stringValue()).isEqualTo("TEST_ONLY");
                 checks.add("full document bytes/CRLF/EOF/blob/digest and test-only provenance match real Git");
                 second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# HIT Updated\n新規則"));
-                fixture.publish(second, first, second);
-                JsonNode current = call(client, service.uri, token, "search_documents", Map.of("query", "HIT"));
+                fixture.publish(Map.of("sample", second, "b", first));
+                JsonNode current = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "repositoryId", "sample"));
                 assertSuccess(current);
-                assertThat(current.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
-                JsonNode continued = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", oldCursor));
+                assertThat(current.path("structuredContent").path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
+                assertError(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", oldCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                assertError(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "sample", "cursor", aCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                JsonNode continued = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "b", "cursor", bCursor));
                 assertSuccess(continued);
-                assertThat(continued.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
                 assertThat(continued.path("structuredContent").path("items").get(0).path("section").path("startLine").intValue()).isEqualTo(3);
-                JsonNode oldRead = call(client, service.uri, token, "read_document", readArguments(first, 3));
-                assertSuccess(oldRead);
-                assertThat(oldRead.path("structuredContent").path("content").stringValue()).isEqualTo(body);
-                checks.add("new search uses D2; D1 continuation and explicit full read remain pinned");
+                assertError(call(client, service.uri, token, "read_document", readArguments(first, 3)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                JsonNode bRead = call(client, service.uri, token, "read_document", readArguments("b", first, bPath, 1));
+                assertSuccess(bRead);
+                assertThat(bRead.path("structuredContent").path("content").stringValue().getBytes(StandardCharsets.UTF_8)).isEqualTo(bBytes);
+                assertError(call(client, service.uri, token, "read_document", readArguments("b", first, DocumentFixture.GUIDE, 1)), "DOCUMENT_NOT_FOUND");
+                checks.add("A update expires A/global while B scoped continuation and exact bytes survive; foreign-path substitution refuses");
                 byte[] badBytes = "# HIT Broken\n不應啟用".getBytes(StandardCharsets.UTF_8);
                 Map<String, Object> badRow = fixture.row(DocumentFixture.GUIDE, badBytes);
                 badRow.put("contentDigest", "0".repeat(64));
                 rejected = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, badBytes), List.of(badRow));
-                fixture.publish(rejected, first, second, rejected);
-                JsonNode preserved = call(client, service.uri, token, "search_documents", Map.of("query", "HIT"));
+                fixture.publish(Map.of("sample", rejected, "b", first));
+                JsonNode preserved = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "repositoryId", "sample"));
                 assertSuccess(preserved);
-                assertThat(preserved.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
+                assertThat(preserved.path("structuredContent").path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
                 assertThat(preserved.path("structuredContent").path("publicationStatus").stringValue()).isEqualTo("UPDATE_REJECTED");
                 assertThat(preserved.path("structuredContent").path("publicationErrorCode").stringValue()).isEqualTo("DOCUMENT_CATALOG_INVALID");
                 checks.add("invalid D3 preserves actual D2 identity with explicit rejected status");
@@ -103,27 +117,28 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 assertThat(invalidRestart.process.exitValue()).isNotZero();
             }
             checks.add("restart with invalid selection fails closed");
-            fixture.publish(second, first, second);
+            fixture.publish(Map.of("sample", second, "b", first));
             try (OwnedService restarted = new OwnedService(jar, fixture, token, work.resolve("restarted.log"))) {
                 restarted.awaitReady(client);
                 initialize(client, restarted.uri, token);
                 JsonNode staleCursor = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", oldCursor));
                 assertError(staleCursor, "INVALID_ARGUMENT");
-                JsonNode exact = call(client, restarted.uri, token, "read_document", readArguments(first, 1));
+                JsonNode exact = call(client, restarted.uri, token, "read_document", readArguments("b", first, bPath, 1));
                 assertSuccess(exact);
-                assertThat(exact.path("structuredContent").path("content").stringValue()).isEqualTo(body);
-                checks.add("valid restart restores retained exact reads but rejects old process cursor");
-                fixture.publish(first, first, second);
-                JsonNode firstAgain = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
-                assertSuccess(firstAgain);
-                String pinned = firstAgain.path("structuredContent").path("page").path("nextCursor").stringValue();
-                fixture.publish(second, second);
+                assertThat(exact.path("structuredContent").path("content").stringValue().getBytes(StandardCharsets.UTF_8)).isEqualTo(bBytes);
                 assertError(call(client, restarted.uri, token, "read_document", readArguments(first, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                checks.add("valid restart restores current B exact bytes but rejects old process cursor and old A locator");
+                JsonNode fresh = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
+                String pinned = fresh.path("structuredContent").path("page").path("nextCursor").stringValue();
+                fixture.publish(Map.of("b", first));
+                assertError(call(client, restarted.uri, token, "read_document", readArguments(second, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
                 assertError(call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", pinned)), "DOCUMENT_REVISION_NOT_AVAILABLE");
-                JsonNode remaining = call(client, restarted.uri, token, "read_document", readArguments(second, 1));
-                assertSuccess(remaining);
-                assertThat(remaining.path("structuredContent").path("content").stringValue()).isEqualTo("# HIT Updated\n新規則");
-                checks.add("withdrawal fails explicitly without retargeting while D2 remains readable");
+                assertSuccess(call(client, restarted.uri, token, "read_document", readArguments("b", first, bPath, 1)));
+                fixture.publish(Map.of());
+                JsonNode empty = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT"));
+                assertSuccess(empty);
+                assertThat(empty.path("structuredContent").path("items").isEmpty()).isTrue();
+                checks.add("owner removal and empty selection expire locators without deleting historical Git objects");
             }
             OwnedService interruptedOwner = new OwnedService(jar, fixture, token, work.resolve("interrupted-owner.log"));
             try {

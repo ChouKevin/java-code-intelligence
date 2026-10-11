@@ -2,7 +2,11 @@ package com.java.semantic.document.catalog;
 
 import com.java.semantic.document.application.DocumentContract;
 import com.java.semantic.document.application.DocumentContract.CollectionPurpose;
+import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.application.DocumentDeadline;
+import com.java.semantic.document.application.DocumentQueryService;
+import com.java.semantic.document.application.DocumentCursorCodec;
+import com.java.semantic.document.application.DocumentOperationGate;
 import com.java.semantic.document.mcp.DocumentResultWriter;
 import com.java.semantic.document.support.DocumentFixture;
 import com.java.semantic.model.source.SourceContext;
@@ -15,6 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.dircache.DirCacheBuilder;
@@ -33,7 +38,7 @@ class DocumentLocalPublisherTest {
     @TempDir Path temporary;
     static LocalDocumentPublisher.UpdateRequest request() {
         return new LocalDocumentPublisher.UpdateRequest(new SourceContext("sample", DocumentFixture.SOURCE_REVISION),
-                List.of(), List.of("guide.md"), Optional.empty(), List.of());
+                List.of(), List.of("guide.md"), Optional.empty());
     }
     static void identity(DocumentFixture fixture) throws Exception {
         fixture.git.getRepository().getConfig().setString("user", null, "name", "Fixture");
@@ -45,7 +50,7 @@ class DocumentLocalPublisherTest {
             assertThrows(LocalDocumentPublisher.Failure.class, () -> new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage()));
             identity(fixture);
             try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
-                assertTrue(publisher.status().activeRevision().isEmpty());
+                assertTrue(publisher.status().activeRevisions().isEmpty());
                 assertTrue(publisher.status().candidateRevision().isEmpty());
                 assertFalse(Files.exists(fixture.publication));
                 assertFalse(Files.exists(fixture.root.resolve("navigation-catalog.json")));
@@ -56,11 +61,11 @@ class DocumentLocalPublisherTest {
                     () -> new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage())).code());
         }
     }
-    @Test void selectiveRawUpdatePreservesUnrelatedChangesAndOldReads() throws Exception {
+    @Test void selectiveRawUpdatePreservesUnrelatedChangesAndHistoricalGitBytes() throws Exception {
         try (DocumentFixture fixture = new DocumentFixture(temporary.resolve("repo"))) {
             identity(fixture);
             String a = fixture.commit(Map.of(DocumentFixture.GUIDE, "# A\nold\n", "repositories/sample/other.md", "# Other\n"));
-            fixture.publish(a, a);
+            fixture.publish(Map.of("sample", a));
             try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
                 assertFalse(publisher.update(request()).commitCreated());
                 assertEquals(a, fixture.git.getRepository().resolve("HEAD").name());
@@ -85,8 +90,8 @@ class DocumentLocalPublisherTest {
                 LocalDocumentPublisher.Result result = publisher.update(request());
                 String b = result.candidateRevision().orElseThrow();
                 assertTrue(result.commitCreated());
-                assertEquals(Optional.of(b), result.activeRevision());
-                assertTrue(result.retainedRevisions().containsAll(List.of(a, b)));
+                assertEquals(b, result.activeRevisions().get("sample"));
+                assertEquals(Map.of("sample", b), publisher.status().activeRevisions());
                 try (RevWalk walk = new RevWalk(fixture.git.getRepository())) {
                     assertEquals(a, walk.parseCommit(org.eclipse.jgit.lib.ObjectId.fromString(b)).getParent(0).name());
                 }
@@ -99,8 +104,8 @@ class DocumentLocalPublisherTest {
                 try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
                     DocumentCatalog.CatalogView view = new DocumentSelectionLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader)
                             .load(Files.readAllBytes(fixture.publication), Map.of(), DocumentDeadline.after(DocumentContract.OPERATION_TIMEOUT));
-                    assertEquals("# A\nold\n", view.revisions().get(a).documents().get(DocumentFixture.GUIDE).content());
-                    assertEquals(2, view.revisions().get(b).documents().size());
+                    assertEquals("# B\nnew\n", view.repositories().get("sample").documents().get(DocumentFixture.GUIDE).content());
+                    assertEquals(2, view.repositories().get("sample").documents().size());
                 }
                 assertFalse(publisher.update(request()).commitCreated());
                 assertEquals(b, fixture.git.getRepository().resolve("HEAD").name());
@@ -117,7 +122,7 @@ class DocumentLocalPublisherTest {
             DirCacheEntry second = rawEntry(fixture, secondPath, "second unrelated blob");
             replaceIndexEntries(fixture, List.of(first, second), List.of());
             String a = fixture.git.commit().setMessage("Unrelated raw paths").call().name();
-            fixture.publish(a, a);
+            fixture.publish(Map.of("sample", a));
             // Exercise extended index flags as well as the ordinary assume-valid bit.
             Process process = new ProcessBuilder("git", "update-index", "--skip-worktree", "-z", "--stdin")
                     .directory(fixture.root.toFile()).redirectErrorStream(true).start();
@@ -140,7 +145,7 @@ class DocumentLocalPublisherTest {
             try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
                 LocalDocumentPublisher.Result result = publisher.update(request());
                 assertTrue(result.commitCreated());
-                String b = result.activeRevision().orElseThrow();
+                String b = result.activeRevisions().get("sample");
                 try (LocalDocumentGit git = new LocalDocumentGit(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
                     DirCache tree = git.tree(Optional.of(ObjectId.fromString(b)));
                     assertEquals(before.getEntryCount(), tree.getEntryCount());
@@ -165,7 +170,7 @@ class DocumentLocalPublisherTest {
             DirCacheEntry original = rawEntry(fixture, originalPath, "unchanged blob");
             replaceIndexEntries(fixture, List.of(original), List.of());
             String a = fixture.git.commit().setMessage("Raw path before staged rename").call().name();
-            fixture.publish(a, a);
+            fixture.publish(Map.of("sample", a));
             DirCacheEntry renamed = new DirCacheEntry(new byte[] {(byte) 0xfe});
             renamed.copyMetaData(original);
             replaceIndexEntries(fixture, List.of(renamed), List.of(originalPath));
@@ -190,16 +195,16 @@ class DocumentLocalPublisherTest {
             catalog.setFileMode(FileMode.EXECUTABLE_FILE);
             replaceIndexEntries(fixture, List.of(catalog), List.of());
             String a = fixture.git.commit().setMessage("Executable catalog").call().name();
-            fixture.publish(a, a);
+            fixture.publish(Map.of("sample", a));
             try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
                 LocalDocumentPublisher.Result noop = publisher.update(request());
                 assertFalse(noop.commitCreated());
-                assertEquals(Optional.of(a), noop.activeRevision());
+                assertEquals(a, noop.activeRevisions().get("sample"));
                 assertEquals(a, fixture.git.getRepository().resolve("HEAD").name());
                 Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "# B\n");
                 LocalDocumentPublisher.Result update = publisher.update(request());
                 assertTrue(update.commitCreated());
-                String b = update.activeRevision().orElseThrow();
+                String b = update.activeRevisions().get("sample");
                 try (LocalDocumentGit git = new LocalDocumentGit(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
                     assertEquals(FileMode.EXECUTABLE_FILE, git.tree(Optional.of(ObjectId.fromString(b)))
                             .getEntry("navigation-catalog.json").getFileMode());
@@ -285,7 +290,7 @@ class DocumentLocalPublisherTest {
         try (DocumentFixture fixture = new DocumentFixture(temporary.resolve("repo"))) {
             identity(fixture);
             String a = fixture.commit(Map.of(DocumentFixture.GUIDE, "# A\n"));
-            fixture.publish(a, a);
+            fixture.publish(Map.of("sample", a));
             Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "# Staged\n");
             fixture.git.add().addFilepattern(DocumentFixture.GUIDE).call();
             byte[] index = Files.readAllBytes(fixture.root.resolve(".git/index"));
@@ -309,6 +314,76 @@ class DocumentLocalPublisherTest {
             }
         }
     }
+    @Test void targetedRemovalPublishesPartialAndEmptyGroupsWithoutDeletingGitHistoryOrOtherOwner() throws Exception {
+        try (DocumentFixture fixture = new DocumentFixture(temporary.resolve("removals"))) {
+            identity(fixture);
+            byte[] a = "# A\nneedle\n# More\nneedle\n".getBytes(StandardCharsets.UTF_8);
+            byte[] b = "# B\r\nneedle\r\n".getBytes(StandardCharsets.UTF_8);
+            String other = "repositories/sample/other.md";
+            String bPath = "repositories/b/guide.md";
+            String original = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, a, other, a, bPath, b),
+                    List.of(fixture.row(DocumentFixture.GUIDE, a), fixture.row(other, a),
+                            fixture.row(bPath, b, new SourceContext("b", DocumentFixture.SOURCE_REVISION))));
+            fixture.publish(Map.of("sample", original, "b", original));
+            try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage());
+                    GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper))) {
+                DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
+                DocumentQueryService service = new DocumentQueryService(
+                        catalog, new DocumentCursorCodec(fixture.mapper), new DocumentOperationGate());
+                DocumentContract.SearchResult oldA = service.search(new DocumentContract.SearchRequest("needle", 1, Optional.empty(), Optional.of("sample")), value -> value);
+                DocumentContract.SearchHit oldB = service.search(new DocumentContract.SearchRequest("needle", 1, Optional.empty(), Optional.of("b")), value -> value).items().getFirst();
+                Files.writeString(fixture.root.resolve(other), "unrelated dirty document");
+                LocalDocumentPublisher.Result partial = publisher.remove(new LocalDocumentPublisher.RemoveRequest("sample", List.of("guide.md"), Optional.empty()));
+                assertEquals(original, partial.activeRevisions().get("b"));
+                assertNotEquals(original, partial.activeRevisions().get("sample"));
+                assertFalse(Files.exists(fixture.root.resolve(DocumentFixture.GUIDE)));
+                assertEquals("unrelated dirty document", Files.readString(fixture.root.resolve(other)));
+                assertEquals(DocumentFailure.Code.DOCUMENT_REVISION_NOT_AVAILABLE, assertThrows(DocumentFailure.class,
+                        () -> service.read(new DocumentContract.ReadRequest(oldA.items().getFirst().documentContext(), DocumentFixture.GUIDE, 1), value -> value)).code());
+                assertEquals(DocumentFailure.Code.DOCUMENT_REVISION_NOT_AVAILABLE, assertThrows(DocumentFailure.class,
+                        () -> service.search(new DocumentContract.SearchRequest("needle", 1, oldA.page().nextCursor(), Optional.of("sample")), value -> value)).code());
+                assertEquals(new String(b, StandardCharsets.UTF_8), service.read(new DocumentContract.ReadRequest(oldB.documentContext(), bPath, 1), value -> value).content());
+                Files.delete(fixture.root.resolve(other));
+                assertThrows(LocalDocumentPublisher.Failure.class, () -> publisher.update(new LocalDocumentPublisher.UpdateRequest(
+                        new SourceContext("sample", DocumentFixture.SOURCE_REVISION), List.of(), List.of("other.md"), Optional.empty())));
+                assertTrue(publisher.status().activeRevisions().containsKey("sample"));
+                LocalDocumentPublisher.Result finalA = publisher.remove(new LocalDocumentPublisher.RemoveRequest("sample", List.of("other.md"), Optional.empty()));
+                assertEquals(Map.of("b", original), finalA.activeRevisions());
+                assertTrue(service.search(new DocumentContract.SearchRequest("needle", 1, Optional.empty(), Optional.of("sample")), value -> value).items().isEmpty());
+                publisher.remove(new LocalDocumentPublisher.RemoveRequest("b", List.of("guide.md"), Optional.empty()));
+                assertTrue(publisher.status().activeRevisions().isEmpty());
+                assertTrue(service.search(new DocumentContract.SearchRequest("needle", 1, Optional.empty(), Optional.empty()), value -> value).items().isEmpty());
+                assertTrue(service.search(new DocumentContract.SearchRequest("needle", 1, Optional.empty(), Optional.of("b")), value -> value).items().isEmpty());
+                assertArrayEquals(a, blob(fixture, original, DocumentFixture.GUIDE));
+                assertArrayEquals(b, blob(fixture, original, bPath));
+            }
+        }
+    }
+
+    @Test void dirtyUnknownForeignAndEscapingRemovalRefuseBeforeStateLoss() throws Exception {
+        try (DocumentFixture fixture = new DocumentFixture(temporary.resolve("remove-refusals"))) {
+            identity(fixture);
+            String revision = fixture.commit(Map.of(DocumentFixture.GUIDE, "# Original\n"));
+            fixture.publish(Map.of("sample", revision));
+            byte[] selection = Files.readAllBytes(fixture.publication);
+            byte[] index = Files.readAllBytes(fixture.root.resolve(".git/index"));
+            Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "dirty named bytes");
+            try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(fixture.properties(CollectionPurpose.TEST_ONLY).storage())) {
+                for (LocalDocumentPublisher.RemoveRequest request : List.of(
+                        new LocalDocumentPublisher.RemoveRequest("sample", List.of("guide.md"), Optional.empty()),
+                        new LocalDocumentPublisher.RemoveRequest("sample", List.of("unknown.md"), Optional.empty()),
+                        new LocalDocumentPublisher.RemoveRequest("b", List.of("guide.md"), Optional.empty()),
+                        new LocalDocumentPublisher.RemoveRequest("sample", List.of("../guide.md"), Optional.empty()))) {
+                    assertThrows(LocalDocumentPublisher.Failure.class, () -> publisher.remove(request));
+                    assertEquals(revision, fixture.git.getRepository().resolve("HEAD").name());
+                    assertArrayEquals(selection, Files.readAllBytes(fixture.publication));
+                    assertArrayEquals(index, Files.readAllBytes(fixture.root.resolve(".git/index")));
+                    assertEquals("dirty named bytes", Files.readString(fixture.root.resolve(DocumentFixture.GUIDE)));
+                }
+            }
+        }
+    }
+
     @Test void unsafeInputRemoteAndApprovalRefuseBeforeCommit() throws Exception {
         try (DocumentFixture fixture = new DocumentFixture(temporary.resolve("repo"))) {
             identity(fixture);
@@ -336,11 +411,12 @@ class DocumentLocalPublisherTest {
                 assertNull(fixture.git.getRepository().resolve("HEAD"));
                 LocalDocumentPublisher.UpdateRequest draft = request();
                 LocalDocumentPublisher.Result approved = publisher.update(new LocalDocumentPublisher.UpdateRequest(draft.primaryContext(),
-                        draft.relatedContexts(), draft.fileNames(), Optional.of("operator review"), List.of()));
+                        draft.relatedContexts(), draft.fileNames(), Optional.of("operator review")));
                 assertTrue(approved.commitCreated());
                 try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.APPROVED).storage(), new DocumentResultWriter(fixture.mapper))) {
-                    assertEquals(DocumentContract.ReviewStatus.APPROVED, loader.load(approved.activeRevision().orElseThrow(),
-                            DocumentDeadline.after(DocumentContract.OPERATION_TIMEOUT)).documents().get(DocumentFixture.GUIDE).reviewStatus());
+                    assertEquals(DocumentContract.ReviewStatus.APPROVED, loader.load(approved.activeRevisions().get("sample"), Set.of("sample"),
+                            DocumentDeadline.after(DocumentContract.OPERATION_TIMEOUT), DocumentContract.MAX_DOCUMENTS,
+                            DocumentContract.MAX_TOTAL_BYTES, DocumentContract.MAX_TOTAL_SECTIONS).get("sample").documents().get(DocumentFixture.GUIDE).reviewStatus());
                 }
             }
         }

@@ -5,8 +5,10 @@ process、真實外部模型客戶端、image/CI 與部署安全；任何一層�
 MCP 提供 source、syntax 與可選 static Relations 證據，不產生已驗證業務推論、
 runtime call graph 或 finding。最新範圍與限制見
 [Current verification status](testing.md#current-verification-status)。
-原始 dated runs、fixture SHAs、完整失敗紀錄可從 Git `527ccb8` 的本文件與 testing
-取回；private `.superpowers/` 證據保留，不把舊答案改寫或重新標成 PASS。
+Existing dated runs, fixture SHAs, and failures are historical baseline evidence
+from their recorded code/runtime and do not establish latest-document-navigation
+acceptance. Private `.superpowers/` evidence remains unchanged; do not rewrite
+old answers or relabel historical results as new passes.
 
 ## 入口與測試範圍
 
@@ -142,28 +144,53 @@ runtime call graph 或 finding。最新範圍與限制見
 
 ## Independent Document MCP acceptance
 
+**Latest-document-navigation local acceptance is recorded in
+[Testing and verification](testing.md#current-verification-status).**
+Ordinary/native checks and fresh dual-MCP Query scenarios have executed; recovered
+model/tool/citation errors remain PASS_WITH_RECOVERY, not clean passes. The
+checklist below remains the contract for future changed snapshots and deployments.
+
 Use [Document MCP operations](document-mcp.md) and the actual packaged native
 launcher, separately from external-agent reasoning.
 
-- Admit complete immutable Git catalogs before active replacement. Actual search/read wire checks
-  verify last-good UPDATE_REJECTED, fail-closed startup, byte/result/time budgets, BUSY ownership
-  and read leases held through materialization. Response timeout is not forced filesystem kill.
-- Current case: actual `search_documents`, exact **full document** read, then Source Query navigation/raw
-  source. Snippets are pointers, never full-read evidence or verified business facts.
-- Historical case: active documents may analyze different source. All Source Query calls stay on each
-  selected historical pin; document/source comparison grants no analyzed-SHA source read authority.
-- Thin/no-hit case: labeled sparse/empty navigation expands Source Query investigation after complete
-  unfiltered paginated discovery; distinguish unread/unavailable from evidence of absence.
-- Update case: actual active D2 commit with unchanged source pins. New searches use D2; retained D1
-  cursor/read remains D1 until explicit withdrawal. Invalid D3 preserves actual last-good identity;
-  missing pins never retarget active. Native checks include restart and rollback/recovery.
-- Preserve source and document identities separately. Document citations are
-  `documentRepo@fullDocumentSHA:path#L<sectionStartLine>`, based on actually read Git bytes and real
-  original section starts; source citations are `sourceRepo@fullSourceSHA:path:Lstart-Lend`.
-  Independent source verification is mandatory even when Document response trust is NOT_VERIFIED.
-- Fresh `gpt-6-luna` query gets only both read MCPs, neutral question, selected source contexts and query
-  skill; no preloaded document bodies, author trace, answer key, local source or prepare credentials.
-  Capture both complete wire traces, not just tool count/schema or outer null error.
+- Admit the complete bounded format-2 owner map and format-1 Git catalogs before
+  replacing the reader state. Runtime checks cover last-good `UPDATE_REJECTED`,
+  fail-closed startup, valid empty selection, resource/result/time budgets,
+  `DOCUMENT_BUSY` ownership and leases through materialization.
+- Global search can return hits from different owner commits. Verify each hit's
+  complete `{documentRepositoryId,repositoryId,documentRevision}` context,
+  lexical path/section ordering, and full-document read with that exact context.
+  Optional `repositoryId` scope is successful and empty for a valid owner with no
+  selected documents; no single top-level document commit represents a global page.
+- Source cases preserve independently selected exact contexts: document source
+  metadata never authorizes a Source SHA, and historical source requests stay on
+  their chosen pin without historical-document lookup. Thin/no-hit/removed/stale
+  guidance expands source discovery; it is not evidence of absence.
+- Update A while B remains selected at its previous commit. Verify stale A read
+  and A-scoped cursor fail; B read and B-scoped cursor remain valid, including a
+  B hit returned before A changed. A global cursor expires only on an effective
+  owner-map change; a true A no-op invalidates neither scope. A failed A
+  candidate preserves the actual last-good map.
+- Explicit named removal changes only that owner's map entry and Git tree in a
+  new commit; final-file removal removes that owner, and final-owner removal
+  leaves a valid empty map. Old A contexts fail while B remains readable. Git
+  history remains but is not document MCP membership; no Source operation occurs.
+- Selection-write failure recovery is inspected and repeats the same authorized
+  update/remove with unchanged inputs, reusing its committed candidate without a
+  duplicate empty commit. Cover a pending final-document removal and refuse
+  arbitrary old-commit activation or a later changed-input candidate.
+- Source advance/rollback may leave documents temporarily lagging. Revise the
+  named current group against the resulting source SHA using a forward document
+  commit; never reverse-select an old document commit or mutate Source current.
+- Preserve full document citations
+  `documentRepositoryId@fullDocumentSHA:path#L<sectionStartLine>` and exact source
+  citations `repositoryId@fullSourceSHA:path:Lstart-Lend`. Source verification is
+  mandatory even when document trust is `NOT_VERIFIED`.
+- A fresh external `gpt-6-luna` client must receive only both read MCPs, a neutral
+  question and selected source contexts. Preserve client/version/invocation,
+  complete unedited arguments/results and source-grounded answer; no local-source,
+  author trace, answer key or prepare credentials. Current recorded runs do not
+  authorize deployment or replace acceptance for a later changed runtime.
 
 ## Centralized pregenerated navigation acceptance
 
@@ -205,9 +232,11 @@ external Document MCP search or Elasticsearch proof. Follow
 
 Inspect each delivered section's actual document identity/section, primary analyzed source, required
 context/header/Evidence rows, cross-repo identities, qualifications and unread scope. Full reads preserve
-tables/evidence association under one pinned document version; snippets alone are insufficient.
-Approval, local commit/activation, running MCP adoption and formal search/publication are separate facts.
-Use the classification rules below; never replace model output with controller-corrected prose.
+the complete section—including tables, qualifiers and evidence-to-context associations—under the exact
+owner-bound document context; a snippet alone is not a full read.
+Human approval of exact content, a local candidate commit, owner-map publication/selection, running MCP
+adoption and formal acceptance are distinct facts; never infer one from another. Use the classification
+rules below; never replace model output with controller-corrected prose.
 
 ## Module-aware guide acceptance
 
@@ -250,11 +279,13 @@ existing executables/artifact inputs and explicit authorization, not prewritten 
 Record source-only add, default refresh, exact historical prepare, description-only, local TEST_ONLY
 without remote and optional Relations routing distinctly. Text-only routing/links are not runtime proof.
 
-Local-document operator gets approved normal disposable Git/selection paths, actual Markdown/source
-identities and explicit write/activation scope, not catalog JSON or expected sequence. Use packaged local
-update path, preserve unrelated dirty bytes, keep TEST_ONLY/DRAFT/NOT_VERIFIED and verify running
-Document MCP identity. CLI commit/status alone may accurately be `serviceVerified:false`; never claim
-adoption without wire proof. No invented remote/push/source prepare/service restart.
+Local-document operator gets approved normal disposable Git/selection paths,
+actual Markdown/source identities and explicit named update/removal scope, not
+catalog JSON or an expected sequence. Use the packaged local command, preserve
+unrelated dirty bytes, keep TEST_ONLY/DRAFT/NOT_VERIFIED, and verify running
+Document MCP identity. CLI commit/status alone may accurately be
+`serviceVerified:false`; never claim adoption without wire proof. No invented
+remote/push/source prepare/service restart.
 
 After operator update, independent explicit Luna client has only Document and Source Query MCP read
 tools, not local source, author trace, oracle/catalog-writing/management tools. It reads operator-produced

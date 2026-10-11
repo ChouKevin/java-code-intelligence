@@ -11,7 +11,7 @@ import java.util.Optional;
 public final class DocumentContract {
     private DocumentContract() { }
     public static final int MAX_PUBLICATION_BYTES = 16 * 1024;
-    public static final int MAX_REVISIONS = 8;
+    public static final int MAX_REPOSITORIES = 128;
     public static final int MAX_CATALOG_BYTES = 256 * 1024;
     public static final int MAX_DOCUMENTS = 128;
     public static final int MAX_DOCUMENT_BYTES = 64 * 1024;
@@ -37,14 +37,15 @@ public final class DocumentContract {
     public enum PublicationStatus { READY, UPDATE_REJECTED }
     public enum Scope { FULL_DOCUMENT }
 
-    public record DocumentContext(String documentRepositoryId, String documentRevision) {
+    public record DocumentContext(String documentRepositoryId, String repositoryId, String documentRevision) {
         public DocumentContext {
             documentRepositoryId = new RepositoryId(documentRepositoryId).value();
+            repositoryId = new RepositoryId(repositoryId).value();
             documentRevision = RepositoryRevision.ofSha(documentRevision).value();
         }
     }
     public record Section(int startLine, String title, boolean titleTruncated) { }
-    public record SearchRequest(String query, int limit, Optional<String> cursor) { }
+    public record SearchRequest(String query, int limit, Optional<String> cursor, Optional<String> repositoryId) { }
     public record ReadRequest(DocumentContext documentContext, String path, int sectionStartLine) { }
     @JsonInclude(JsonInclude.Include.NON_ABSENT)
     public record Page(int returned, boolean hasMore, Optional<String> nextCursor) { }
@@ -55,7 +56,7 @@ public final class DocumentContract {
         public SearchHit { relatedContexts = List.copyOf(relatedContexts); }
     }
     @JsonInclude(JsonInclude.Include.NON_ABSENT)
-    public record SearchResult(DocumentContext documentContext, CollectionPurpose collectionPurpose, Trust trust,
+    public record SearchResult(String documentRepositoryId, Optional<String> repositoryId, CollectionPurpose collectionPurpose, Trust trust,
             PublicationStatus publicationStatus, Optional<DocumentFailure.Code> publicationErrorCode,
             List<SearchHit> items, Page page) {
         public SearchResult { items = List.copyOf(items); }

@@ -42,21 +42,58 @@ public final class DocumentCatalog {
                     status, error, DocumentContract.Scope.FULL_DOCUMENT, 1, sections.getLast().endLine(), content);
         }
     }
-    public record RevisionSnapshot(DocumentContext context, NavigableMap<String, Document> documents,
+    public record RepositorySnapshot(DocumentContext context, NavigableMap<String, Document> documents,
             long markdownBytes, int sectionCount) {
-        public RevisionSnapshot { documents = Collections.unmodifiableNavigableMap(new TreeMap<>(documents)); }
+        public RepositorySnapshot { documents = Collections.unmodifiableNavigableMap(new TreeMap<>(documents)); }
     }
-    public record CatalogView(String documentRepositoryId, String activeRevision, CollectionPurpose collectionPurpose,
-            Map<String, RevisionSnapshot> revisions, PublicationStatus publicationStatus, Optional<Code> publicationErrorCode) {
-        public CatalogView { revisions = Map.copyOf(revisions); }
-        public DocumentContext context(String revision) {
-            RevisionSnapshot snapshot = revisions.get(revision);
-            if (Objects.isNull(snapshot)) { throw new DocumentFailure(Code.DOCUMENT_REVISION_NOT_AVAILABLE); }
-            return snapshot.context();
+    public static final class CatalogView {
+        private final String documentRepositoryId;
+        private final CollectionPurpose collectionPurpose;
+        private final NavigableMap<String, RepositorySnapshot> repositories;
+        private final NavigableMap<String, Document> documents;
+        private final String globalVersion;
+        private final PublicationStatus publicationStatus;
+        private final Optional<Code> publicationErrorCode;
+
+        public CatalogView(String documentRepositoryId, CollectionPurpose collectionPurpose,
+                NavigableMap<String, RepositorySnapshot> repositories, NavigableMap<String, Document> documents,
+                String globalVersion, PublicationStatus publicationStatus, Optional<Code> publicationErrorCode) {
+            this.documentRepositoryId = documentRepositoryId;
+            this.collectionPurpose = collectionPurpose;
+            this.repositories = Collections.unmodifiableNavigableMap(new TreeMap<>(repositories));
+            this.documents = Collections.unmodifiableNavigableMap(new TreeMap<>(documents));
+            this.globalVersion = globalVersion;
+            this.publicationStatus = publicationStatus;
+            this.publicationErrorCode = publicationErrorCode;
+        }
+        private CatalogView(CatalogView admitted, Code code) {
+            documentRepositoryId = admitted.documentRepositoryId;
+            collectionPurpose = admitted.collectionPurpose;
+            repositories = admitted.repositories;
+            documents = admitted.documents;
+            globalVersion = admitted.globalVersion;
+            publicationStatus = PublicationStatus.UPDATE_REJECTED;
+            publicationErrorCode = Optional.of(code);
+        }
+        public String documentRepositoryId() { return documentRepositoryId; }
+        public CollectionPurpose collectionPurpose() { return collectionPurpose; }
+        public NavigableMap<String, RepositorySnapshot> repositories() { return repositories; }
+        public NavigableMap<String, Document> documents() { return documents; }
+        public String globalVersion() { return globalVersion; }
+        public PublicationStatus publicationStatus() { return publicationStatus; }
+        public Optional<Code> publicationErrorCode() { return publicationErrorCode; }
+        public RepositorySnapshot requireCurrent(DocumentContext context) {
+            if (!documentRepositoryId.equals(context.documentRepositoryId())) {
+                throw new DocumentFailure(Code.DOCUMENT_REPOSITORY_NOT_FOUND);
+            }
+            RepositorySnapshot snapshot = repositories.get(context.repositoryId());
+            if (Objects.isNull(snapshot) || !snapshot.context().equals(context)) {
+                throw new DocumentFailure(Code.DOCUMENT_REVISION_NOT_AVAILABLE);
+            }
+            return snapshot;
         }
         private CatalogView rejected(Code code) {
-            return new CatalogView(documentRepositoryId, activeRevision, collectionPurpose, revisions,
-                    PublicationStatus.UPDATE_REJECTED, Optional.of(code));
+            return new CatalogView(this, code);
         }
     }
     public static final class ReadLease implements AutoCloseable {
@@ -113,7 +150,7 @@ public final class DocumentCatalog {
                     selected = current;
                 } else {
                     CatalogView candidate = selectionLoader.load(fresh.bytes(),
-                            Objects.isNull(current) ? Map.of() : current.revisions(), deadline);
+                            Objects.isNull(current) ? Map.of() : current.repositories(), deadline);
                     Observation finalSelection = observe(deadline);
                     if (finalSelection.failure().isPresent() || !Arrays.equals(fresh.bytes(), finalSelection.bytes())) {
                         throw new DocumentFailure(Code.DOCUMENT_UNAVAILABLE);

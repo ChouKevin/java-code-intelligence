@@ -2,9 +2,9 @@
 
 ## 目前狀態
 
-Source／Java index／Relations、獨立 Document MCP，以及 local Git 文件更新已完成本機實作與驗證。Local repository operations 已提交並合併到 `main`（`527ccb8`）。**本機完成不代表 release 已驗收**；目前沒有新增已核准的功能 milestone。
+Latest-document-navigation 已完成本機實作與驗收：中央 local Git 中各 business repo 獨立發布最新文件、全域／owner-scoped 搜尋、具名移除與恢復。Document ordinary 與 packaged native 通過；獨立 Luna Query 的正常導覽、過期恢復、source rollback 後 forward 文件更新及缺文件 fallback 均有實際證據，需修正的案例明列 PASS_WITH_RECOVERY。這不代表 Docker／CI／正式部署已驗收，也不自動提交或整合工作分支。Source Query 歷史讀取、source current、index admission、Source retention 與 sealed generations 未改動；詳見 [testing](operations/testing.md#current-verification-status) 的實跑範圍與限制。
 
-這份 roadmap 只保留目前交付範圍、待驗收事項及尚未啟動的方向。操作步驟以 [Source operations](operations/source-mcp.md) 與 [Document operations](operations/document-mcp.md) 為準；測試命令與實際結果集中於 [testing](operations/testing.md#current-verification-status)。
+本 roadmap 保留已交付範圍、待驗收事項及未啟動方向。操作步驟以 [Source operations](operations/source-mcp.md) 與 [Document operations](operations/document-mcp.md) 為準；證據狀態集中於 [testing](operations/testing.md#current-verification-status)。
 
 ## 已交付能力
 
@@ -16,8 +16,8 @@ Source／Java index／Relations、獨立 Document MCP，以及 local Git 文件�
 | Static Relations | opt-in Symbol Solver、核准 roots/JARs、靜態目標、uncertainty、候選 framework evidence | 不是 runtime call graph，也不自動建立跨 repo joins |
 | Source 讀檔 | 有界兩層預覽、多段／檔尾原文、Java 結構摘要、原始行號與精確 locator | 省略本文不算已讀；cursor 固定版本／view，不跨程序持久化 |
 | Repository 導覽 | 描述、module／入口／關係模板、短版 discovery hints | 文件一律 NOT_VERIFIED；入口、module 與已部署服務不是同一件事 |
-| Document MCP | 獨立 stateless 文件搜尋／完整讀取、active／retained 文件版本 | 與 Source Query、source SHA、token 各自獨立；無命中須回 source 擴大查找 |
-| Local Git 文件操作 | 具名 update、自動 catalog/digests、local commit、activate/status、明示 withdraw | 不需 remote／手填 JSON；不覆寫他人修改；本機成功另驗 running MCP |
+| Document MCP | 獨立 stateless 搜尋／完整讀取；全域或可選 owner scope；每 business repo 一個 latest document group | mixed hits 帶各自完整 context；A 更新不影響 unchanged B 的 read／scoped cursor |
+| Local Git 文件操作 | 具名 update/remove/status、format-1 catalog、format-2 per-owner selection、owner map 原子發布 | 支援 final-file removal、same-operation recovery 與 empty map；無 remote／手填 JSON；Git/index/working files/selection 不是跨資源單一 transaction |
 | Agent 操作入口 | manage／describe／query 三個 skills | 操作、撰寫、查證各自獨立，不將 source、文件與 index 強綁 |
 
 ### 模組與依賴
@@ -33,24 +33,23 @@ Source／Java index／Relations、獨立 Document MCP，以及 local Git 文件�
 
 ## 現行文件工作流
 
-1. Author 讀核准的 exact source，依 [canonical template](operations/repository-context-prompt.md#module-aware-guide-template) 產生描述／導覽並列出已讀與未讀範圍。
-2. 文件集中於獨立 **local Git，無 remote**。正式 APPROVED 更新須審閱精確內容／source identities，並另獲啟用授權；明示核准的測試可使用 TEST_ONLY／DRAFT。
-3. [manage-repository](../skills/manage-repository/SKILL.md) 使用 local CLI 更新具名 Markdown；工具建立 catalog、commit 與 selection。只改文件不要求 business repo commit、source refresh 或 index build。
-4. Query agent 先用 Document MCP 搜尋並讀完整文件，再用 Source Query MCP 查證使用者指定版本。先完整列舉可讀 repo，再依導覽決定深入順序；文件沒有命中不等於不存在。
+1. Author 讀核准 exact source，依 [canonical template](operations/repository-context-prompt.md#module-aware-guide-template) 產生描述／導覽並列出已讀與未讀範圍。描述可記錄 module、repo 關係及可由 source 檢查的線索，不將關係當成 runtime wiring。
+2. 文件集中於獨立 **local Git，無 remote**。每個 business repository 的具名 descriptions/guides 作為一個 publication group；format-2 selection map 將 owner 指向一個 effective document commit，generated catalog JSON 維持 format 1。Formal APPROVED update 須核准精確內容/source identities；named removal 須明確移除核准。TEST_ONLY/DRAFT 保持實際狀態。
+3. [manage-repository](../skills/manage-repository/SKILL.md) 以 `update` 更新具名 Markdown，以 `remove` 移除具名檔案（包括最後一檔），以 `status` 檢查 Git HEAD candidate 與 owner map。只改文件不要求 business repo commit、source refresh 或 index build；`serviceVerified:false` 須另經實際 Document MCP 查證。
+4. Query agent 預設全域搜尋，必要時以 `repositoryId` 篩選；每個 hit 的 context 各自綁 owner 與完整 document SHA。Agent 讀完整文件，再透過 Source Query 查證使用者選定的 source pin。A 更新不影響未變更 B 的讀取／scoped cursor；global cursor 在任何 effective map 變更後失效。
 
-Source SHA、文件 commit 與 index generation 是不同身分。文件不為每個 source commit 重產；讀歷史 source 時仍固定該 SHA，不因較新的導覽而改查 current。多 module／跨 repo 關係目前以文件線索加雙側 source 證據處理，不增加第二套 graph 或 catalog 管理介面。
+Source change／rollback 後可有 source/document lag。Author 依 resulting source SHA 修訂受影響的具名文件，並在 document Git 建立 forward commit；不 reverse-select 舊文件、不自動同步，也不因 related context fan-out 重寫其他 owner。不同 SHAs 本身不證明敘述矛盾；missing／removed documents 只觸發 source discovery，不表示 Source unregister/delete。
 
 ## Release 待驗收
 
-下列是尚未完成的 release gates，不是缺少對應功能，也不是已授權的執行任務：
+下列是 release gates，不是已授權的執行任務：
 
 - Docker image／CI 的實際建置與啟動驗證。
 - 正式部署的 TLS／ingress、唯讀 mounts、分離 UID／tokens／allowlists、SQLite 私有 JNI temp 及檔案權限。
 - 正式 repo 的資料量、尖峰 concurrency、磁碟／記憶體 headroom 與故障恢復容量；小型 fixture 或短時 RSS 取樣不能替代。
-- 正式文件內容核准及啟用。Local 文件初始檔案為 0600；跨 UID reader 需操作者配置。Linux extended-POSIX-ACL-only namespace 不支援 local CLI。
-- 依實際部署需求補充複雜多模組依賴、私有套件與未實測的 Relations framework artifact 情境；不宣稱所有 repo 都能自動 onboarding 成功。
+- 正式文件內容核准與發布。Local 文件初始檔案為 0600；跨 UID reader 需操作者配置。Linux extended-POSIX-ACL-only namespace 不支援 local CLI。
 
-發布／重建／回退順序見 [Release and recovery](operations/source-mcp.md#release-and-recovery)。失敗保留既有 READY；不要重寫 sealed source/index 或以 reset／GC 掩蓋部分成功。已回收 source 的恢復仍要求核准 origin 可提供相同 SHA。
+發布／重建／回退順序見 [Release and recovery](operations/source-mcp.md#release-and-recovery)。這些 Source 歷史／retention 規則不因文件導覽改變；不要重寫 sealed source/index 或以 reset／GC 掩蓋部分成功。
 
 ## 未啟動的方向
 
@@ -64,7 +63,7 @@ Source SHA、文件 commit 與 index generation 是不同身分。文件不為�
 
 ## 驗收與歷史
 
-- 目前操作規則、命令及最新本機結果見 [testing](operations/testing.md)；獨立模型查證門檻見 [agent acceptance](operations/mcp-agent-acceptance.md)。需要 agent 時明選 `gpt-6-luna`，不默換模型。
-- 原 Module-aware Guide 的引用失敗、歷史 source 越界及其他被拒答案仍是失敗。後續修正／新案例的 PASS 或 PASS_WITH_RECOVERY 不回溯改寫原判定，也不代表所有模型回答都可靠。
+- 舊版 Source／index／Document results 只適用於其記錄的 code、inputs、runtime 與 scenarios。Latest-document-navigation 的新 ordinary、native、Query 證據另列於 testing；未執行的 image／CI／部署 gates 仍待獨立授權與驗收。
+- 過往 Module-aware Guide 的引用失敗、歷史 source 越界及其他被拒答案仍是失敗。後續修正／新案例的 PASS 或 PASS_WITH_RECOVERY 不回溯改寫原判定，也不代表所有模型回答都可靠。
 - 過往 Phase 1–4、導覽與 Document MCP 的逐輪紀錄可從 Git 歷史取得；整理前完整文件保存在 `527ccb8`。本機 plans／完整 traces／原始答案仍在未追蹤的 `docs/superpowers/` 與 `.superpowers/`，不將私有證據搬入團隊文件。
 - `AGENTS.md`、README、operations、OpenAPI／MCP schemas、Dockerfiles 與 CI 必須維持相同契約；更新文字或建置設定不等於執行了相應 release gate。

@@ -6,6 +6,7 @@ import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.config.DocumentStorage;
 import com.java.semantic.document.mcp.DocumentResultWriter;
 import com.java.semantic.model.source.SourceContext;
+import com.java.semantic.model.repository.RepositoryId;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -36,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.errors.LockFailedException;
 import org.eclipse.jgit.lib.ObjectId;
@@ -45,15 +47,21 @@ import tools.jackson.databind.json.JsonMapper;
 /** Explicit offline operator. A successful result never verifies a running service. */
 public final class LocalDocumentPublisher implements AutoCloseable {
     public record UpdateRequest(SourceContext primaryContext, List<SourceContext> relatedContexts, List<String> fileNames,
-            Optional<String> reviewReference, List<String> withdrawnRevisions) {
+            Optional<String> reviewReference) {
         public UpdateRequest {
             Objects.requireNonNull(primaryContext); relatedContexts = List.copyOf(relatedContexts);
-            fileNames = List.copyOf(fileNames); Objects.requireNonNull(reviewReference); withdrawnRevisions = List.copyOf(withdrawnRevisions);
+            fileNames = List.copyOf(fileNames); Objects.requireNonNull(reviewReference);
         }
     }
-    public record Result(String operation, String documentRepositoryId, Optional<String> candidateRevision,
-            Optional<String> activeRevision, List<String> retainedRevisions, boolean commitCreated, boolean selectionChanged) {
-        public Result { retainedRevisions = List.copyOf(retainedRevisions); }
+    public record RemoveRequest(String repositoryId, List<String> fileNames, Optional<String> reviewReference) {
+        public RemoveRequest {
+            repositoryId = new RepositoryId(repositoryId).value();
+            fileNames = List.copyOf(fileNames); Objects.requireNonNull(reviewReference);
+        }
+    }
+    public record Result(String operation, String documentRepositoryId, Optional<String> repositoryId,
+            Optional<String> candidateRevision, Map<String, String> activeRevisions, boolean commitCreated, boolean selectionChanged) {
+        public Result { activeRevisions = Map.copyOf(activeRevisions); }
     }
     public enum FailureKind { INVALID, BUSY, IO }
     public enum Phase { PREPARE, CANDIDATE, COMMIT, ACTIVATE, STATUS }
@@ -107,27 +115,73 @@ public final class LocalDocumentPublisher implements AutoCloseable {
     private Optional<DocumentCatalog.CatalogView> admitted(Optional<byte[]> selection) {
         return selection.map(bytes -> admission.load(bytes, Map.of(), deadline()));
     }
-    private record Selection(byte[] bytes, List<String> retained) { }
-    private Selection selection(String revision, List<String> withdrawn, Optional<DocumentCatalog.CatalogView> old) {
-        new DocumentContract.DocumentContext(storage.repositoryId(), revision);
-        Set<String> withdrawals = new HashSet<>();
-        for (String value : withdrawn) {
-            new DocumentContract.DocumentContext(storage.repositoryId(), value);
-            if (!withdrawals.add(value) || value.equals(revision)) { throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT"); }
-        }
-        List<String> retained = new ArrayList<>();
-        old.ifPresent(view -> retained.addAll(view.revisions().keySet().stream().sorted().toList()));
-        if (!retained.containsAll(withdrawals)) { throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT"); }
-        retained.removeAll(withdrawals);
-        if (!retained.contains(revision)) { retained.add(revision); }
-        byte[] bytes = JSON.writeValueAsBytes(Map.of("formatVersion", 1, "documentRepositoryId", storage.repositoryId(),
-                "activeRevision", revision, "retainedRevisions", retained));
-        admission.load(bytes, Map.of(), deadline());
-        return new Selection(bytes, List.copyOf(retained));
+    private record Selection(byte[] bytes, Map<String, String> revisions) { }
+    private static Map<String, String> active(Optional<DocumentCatalog.CatalogView> old) {
+        Map<String, String> revisions = new java.util.TreeMap<>();
+        old.ifPresent(view -> view.repositories().forEach((owner, snapshot) ->
+                revisions.put(owner, snapshot.context().documentRevision())));
+        return revisions;
     }
-    public Result update(UpdateRequest request) { return mutate(request, null, List.of()); }
-    public Result activate(String revision, List<String> withdrawnRevisions) { return mutate(null, revision, withdrawnRevisions); }
-    private Result mutate(UpdateRequest request, String revision, List<String> withdrawn) {
+    private Selection selection(String owner, String revision, byte[] catalog, Optional<DocumentCatalog.CatalogView> old,
+            Set<String> namedPaths) {
+        Map<String, String> revisions = active(old);
+        Map<String, DocumentCatalog.RepositorySnapshot> reusable = new java.util.TreeMap<>();
+        old.ifPresent(view -> reusable.putAll(view.repositories()));
+        boolean present = false;
+        DocumentCatalog.RepositorySnapshot previous = old.map(view -> view.repositories().get(owner)).orElse(null);
+        Map<String, DocumentCatalog.Document> previousDocuments = Objects.isNull(previous) ? Map.of() : previous.documents();
+        Map<String, DocumentCatalog.Document> candidateDocuments = Map.of();
+        for (JsonNode row : JSON.readTree(catalog).path("documents")) {
+            if (GitDocumentLoader.text(row.path("primaryContext"), "repositoryId").equals(owner)) { present = true; break; }
+        }
+        if (present) {
+            DocumentCatalog.RepositorySnapshot candidate = loader.load(revision, Set.of(owner), deadline(),
+                    DocumentContract.MAX_DOCUMENTS, DocumentContract.MAX_TOTAL_BYTES, DocumentContract.MAX_TOTAL_SECTIONS).get(owner);
+            candidateDocuments = candidate.documents();
+            if (Objects.isNull(previous) || !previous.documents().equals(candidate.documents())) {
+                revisions.put(owner, revision);
+                reusable.put(owner, candidate);
+            }
+        } else { revisions.remove(owner); }
+        for (Map.Entry<String, DocumentCatalog.Document> entry : previousDocuments.entrySet()) {
+            if (!Objects.equals(entry.getValue(), candidateDocuments.get(entry.getKey())) && !namedPaths.contains(entry.getKey())) {
+                throw refusal("LOCAL_DOCUMENT_OPERATION_MISMATCH");
+            }
+        }
+        for (String path : candidateDocuments.keySet()) {
+            if (!previousDocuments.containsKey(path) && !namedPaths.contains(path)) { throw refusal("LOCAL_DOCUMENT_OPERATION_MISMATCH"); }
+        }
+        List<Map<String, String>> entries = new ArrayList<>();
+        revisions.forEach((id, sha) -> entries.add(Map.of("repositoryId", id, "documentRevision", sha)));
+        byte[] bytes = JSON.writeValueAsBytes(Map.of("formatVersion", 2, "documentRepositoryId", storage.repositoryId(), "repositories", entries));
+        admission.load(bytes, reusable, deadline());
+        return new Selection(bytes, revisions);
+    }
+    private static String operationFingerprint(String owner, UpdateRequest update, RemoveRequest remove,
+            Map<String, byte[]> replacements, List<LocalDocumentGit.Removal> deletions) {
+        Map<String, String> content = new TreeMap<>();
+        if (Objects.nonNull(update)) {
+            for (String name : update.fileNames()) {
+                String path = "repositories/" + owner + "/" + name;
+                content.put(path, digest(replacements.get(path)));
+            }
+        } else {
+            for (LocalDocumentGit.Removal deletion : deletions) { content.put(deletion.path(), digest(deletion.expected())); }
+        }
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("operation", Objects.nonNull(update) ? "update" : "remove");
+        input.put("repositoryId", owner);
+        input.put("documents", content);
+        if (Objects.nonNull(update)) {
+            input.put("primaryContext", update.primaryContext());
+            input.put("relatedContexts", update.relatedContexts());
+            update.reviewReference().ifPresent(value -> input.put("reviewReference", value));
+        } else { remove.reviewReference().ifPresent(value -> input.put("reviewReference", value)); }
+        return digest(JSON.writeValueAsBytes(input));
+    }
+    public Result update(UpdateRequest request) { return mutate(Objects.requireNonNull(request), null); }
+    public Result remove(RemoveRequest request) { return mutate(null, Objects.requireNonNull(request)); }
+    private Result mutate(UpdateRequest request, RemoveRequest remove) {
         requireOpen();
         Phase phase = Phase.PREPARE;
         Optional<String> candidate = Optional.empty();
@@ -142,41 +196,59 @@ public final class LocalDocumentPublisher implements AutoCloseable {
             Optional<DocumentCatalog.CatalogView> old = admitted(observed);
             Optional<ObjectId> head = git.head();
             String branch = git.branch();
-            LocalDocumentGit.Candidate objects = null;
-            byte[] catalog = null;
-            Optional<byte[]> originalCatalog = Optional.empty();
-            if (Objects.nonNull(request)) {
-                index = git.lockIndex();
-                git.requireCleanIndex(index, head);
-                originalCatalog = git.catalog(head);
-                git.requireCatalogUnedited(originalCatalog);
-                phase = Phase.CANDIDATE;
-                Map<String, byte[]> replacements = replacements(request, originalCatalog);
-                catalog = replacements.get("navigation-catalog.json");
-                objects = git.candidate(head, replacements);
-                revision = objects.revision().name();
-                candidate = Optional.of(revision);
-                withdrawn = request.withdrawnRevisions();
-            } else { phase = Phase.ACTIVATE; candidate = Optional.ofNullable(revision); }
-            Selection next = selection(revision, withdrawn, old);
-            boolean changed = old.isEmpty() || !old.orElseThrow().activeRevision().equals(revision)
-                    || !old.orElseThrow().revisions().keySet().equals(new HashSet<>(next.retained()));
-            if (Objects.nonNull(objects) && objects.created()) {
+            index = git.lockIndex();
+            git.requireCleanIndex(index, head);
+            Optional<byte[]> originalCatalog = git.catalog(head);
+            git.requireCatalogUnedited(originalCatalog);
+            phase = Phase.CANDIDATE;
+            String owner = Objects.nonNull(request) ? request.primaryContext().repositoryId() : remove.repositoryId();
+            List<LocalDocumentGit.Removal> deletions = new ArrayList<>();
+            Map<String, byte[]> replacements = Objects.nonNull(request) ? replacements(request, originalCatalog)
+                    : removals(remove, originalCatalog, head, old, deletions);
+            byte[] catalog = replacements.get("navigation-catalog.json");
+            Set<String> removedPaths = new HashSet<>();
+            for (LocalDocumentGit.Removal deletion : deletions) { removedPaths.add(deletion.path()); }
+            String fingerprint = operationFingerprint(owner, request, remove, replacements, deletions);
+            boolean firstPublicationIntent = Objects.nonNull(request)
+                    && old.map(view -> !view.repositories().containsKey(owner)).orElse(true);
+            LocalDocumentGit.Candidate objects = git.candidate(head, replacements, removedPaths, fingerprint, firstPublicationIntent);
+            String revision = objects.revision().name();
+            candidate = Optional.of(revision);
+            Set<String> namedPaths = new HashSet<>();
+            for (String name : Objects.nonNull(request) ? request.fileNames() : remove.fileNames()) {
+                namedPaths.add("repositories/" + owner + "/" + name);
+            }
+            Selection next = selection(owner, revision, catalog, old, namedPaths);
+            String previousRevision = old.map(view -> view.repositories().get(owner))
+                    .map(snapshot -> snapshot.context().documentRevision()).orElse(null);
+            boolean ownerChanged = !Objects.equals(previousRevision, next.revisions().get(owner));
+            if (!objects.created() && ownerChanged) {
+                git.requireOperation(objects.revision(), fingerprint);
+            }
+            boolean changed = ownerChanged || observed.isEmpty();
+            if (objects.created()) {
                 phase = Phase.COMMIT;
                 boundary.enter(phase);
                 requireObservation(observed);
                 git.requireCatalogUnedited(originalCatalog);
+                for (LocalDocumentGit.Removal deletion : deletions) { git.requireRemovalUnchanged(deletion); }
                 git.commit(objects, head, branch, index);
                 replace(git.catalogPath(), catalog);
             }
+            git.requireHead(Optional.of(objects.revision()), branch);
+            requireObservation(observed);
+            git.requireCatalogUnedited(Optional.of(catalog));
+            for (LocalDocumentGit.Removal deletion : deletions) { git.delete(deletion); }
             phase = Phase.ACTIVATE;
             if (changed) {
                 boundary.enter(phase);
                 requireObservation(observed);
+                git.requireHead(Optional.of(objects.revision()), branch);
+                git.requireCatalogUnedited(Optional.of(catalog));
                 replace(storage.publicationFile(), next.bytes());
             }
-            return new Result(Objects.nonNull(request) ? "update" : "activate", storage.repositoryId(), candidate,
-                    Optional.of(revision), next.retained(), Objects.nonNull(objects) && objects.created(), changed);
+            return new Result(Objects.nonNull(request) ? "update" : "remove", storage.repositoryId(), Optional.of(owner), candidate,
+                    next.revisions(), objects.created(), changed);
         } catch (Failure failure) { throw new Failure(failure.kind(), failure.code(), phase, candidate); }
         catch (DocumentFailure failure) { throw new Failure(failure.code() == DocumentFailure.Code.DOCUMENT_UNAVAILABLE ? FailureKind.IO : FailureKind.INVALID, failure.code().name(), phase, candidate); }
         catch (LockFailedException exception) { throw new Failure(FailureKind.BUSY, "LOCAL_DOCUMENT_BUSY", phase, candidate); }
@@ -217,8 +289,7 @@ public final class LocalDocumentPublisher implements AutoCloseable {
         boolean metadataChanged = oldCatalog.isEmpty();
         Map<String, byte[]> replacements = new LinkedHashMap<>();
         for (String name : request.fileNames()) {
-            if (name.isEmpty() || !name.endsWith(".md") || name.contains("/") || name.contains("\\")
-                    || name.codePoints().anyMatch(Character::isISOControl)) { throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT"); }
+            validateName(name);
             String path = "repositories/" + request.primaryContext().repositoryId() + "/" + name;
             if (replacements.containsKey(path)) { throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT"); }
             byte[] bytes = git.snapshot(path, DocumentContract.MAX_DOCUMENT_BYTES);
@@ -237,6 +308,57 @@ public final class LocalDocumentPublisher implements AutoCloseable {
         if (catalog.length > DocumentContract.MAX_CATALOG_BYTES) { throw refusal("DOCUMENT_CAPACITY_EXCEEDED"); }
         replacements.put("navigation-catalog.json", catalog);
         return replacements;
+    }
+    private Map<String, byte[]> removals(RemoveRequest request, Optional<byte[]> catalogBytes, Optional<ObjectId> head,
+            Optional<DocumentCatalog.CatalogView> old, List<LocalDocumentGit.Removal> deletions) throws IOException {
+        if (request.fileNames().isEmpty() || request.fileNames().size() > DocumentContract.MAX_DOCUMENTS
+                || request.reviewReference().filter(String::isBlank).isPresent()
+                || storage.collectionPurpose() == DocumentContract.CollectionPurpose.APPROVED && request.reviewReference().isEmpty()
+                || catalogBytes.isEmpty()) { throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT"); }
+        JsonNode catalog = GitDocumentLoader.parseObject(catalogBytes.orElseThrow(),
+                Set.of("formatVersion", "documentRepositoryId", "documents"));
+        GitDocumentLoader.requireVersion(catalog);
+        if (!GitDocumentLoader.text(catalog, "documentRepositoryId").equals(storage.repositoryId())
+                || !catalog.path("documents").isArray()) { throw refusal("DOCUMENT_CATALOG_INVALID"); }
+        Map<String, JsonNode> rows = new java.util.TreeMap<>();
+        for (JsonNode row : catalog.path("documents")) {
+            if (Objects.nonNull(rows.put(GitDocumentLoader.text(row, "path"), row))) { throw refusal("DOCUMENT_CATALOG_INVALID"); }
+        }
+        Set<String> named = new HashSet<>();
+        boolean changed = false;
+        for (String name : request.fileNames()) {
+            validateName(name);
+            String path = "repositories/" + request.repositoryId() + "/" + name;
+            if (!named.add(path)) { throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT"); }
+            JsonNode row = rows.get(path);
+            byte[] expected;
+            if (Objects.nonNull(row)) {
+                if (!GitDocumentLoader.text(row.path("primaryContext"), "repositoryId").equals(request.repositoryId())) {
+                    throw refusal("DOCUMENT_CATALOG_INVALID");
+                }
+                expected = git.trackedBytes(head, path);
+                rows.remove(path);
+                changed = true;
+            } else {
+                DocumentCatalog.RepositorySnapshot previous = old.map(view -> view.repositories().get(request.repositoryId())).orElse(null);
+                DocumentCatalog.Document published = Objects.isNull(previous) ? null : previous.documents().get(path);
+                if (Objects.isNull(published) || Objects.nonNull(git.tree(head).getEntry(path))) {
+                    throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT");
+                }
+                expected = git.removedBytes(head, path);
+            }
+            deletions.add(git.removal(path, expected));
+        }
+        byte[] next = changed ? JSON.writeValueAsBytes(Map.of("formatVersion", 1, "documentRepositoryId", storage.repositoryId(),
+                "documents", rows.values())) : catalogBytes.orElseThrow();
+        return Map.of("navigation-catalog.json", next);
+    }
+    private static void validateName(String name) {
+        if (name.isEmpty() || !name.endsWith(".md") || name.contains("/") || name.contains("\\")
+                || name.codePoints().anyMatch(code -> Character.isISOControl(code)
+                        || code >= Character.MIN_SURROGATE && code <= Character.MAX_SURROGATE)) {
+            throw refusal("LOCAL_DOCUMENT_INVALID_ARGUMENT");
+        }
     }
     private static String digest(byte[] bytes) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
@@ -309,8 +431,8 @@ public final class LocalDocumentPublisher implements AutoCloseable {
             Optional<byte[]> observed = observe();
             Optional<DocumentCatalog.CatalogView> view = admitted(observed);
             requireObservation(observed);
-            return new Result("status", storage.repositoryId(), git.head().map(ObjectId::name), view.map(DocumentCatalog.CatalogView::activeRevision),
-                    view.map(value -> value.revisions().keySet().stream().sorted().toList()).orElse(List.of()), false, false);
+            return new Result("status", storage.repositoryId(), Optional.empty(), git.head().map(ObjectId::name),
+                    active(view), false, false);
         } catch (Failure failure) { throw new Failure(failure.kind(), failure.code(), Phase.STATUS, Optional.empty()); }
         catch (DocumentFailure failure) { throw new Failure(failure.code() == DocumentFailure.Code.DOCUMENT_UNAVAILABLE ? FailureKind.IO : FailureKind.INVALID, failure.code().name(), Phase.STATUS, Optional.empty()); }
         catch (IOException exception) { throw new Failure(FailureKind.IO, "LOCAL_DOCUMENT_IO_FAILURE", Phase.STATUS, Optional.empty()); }

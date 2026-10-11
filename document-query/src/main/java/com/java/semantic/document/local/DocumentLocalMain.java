@@ -2,12 +2,13 @@ package com.java.semantic.document.local;
 
 import com.java.semantic.document.application.DocumentContract;
 import com.java.semantic.document.application.DocumentContract.CollectionPurpose;
-import com.java.semantic.document.application.DocumentContract.DocumentContext;
 import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.catalog.LocalDocumentPublisher;
 import com.java.semantic.document.catalog.LocalDocumentPublisher.Failure;
 import com.java.semantic.document.catalog.LocalDocumentPublisher.Result;
 import com.java.semantic.document.catalog.LocalDocumentPublisher.UpdateRequest;
+import com.java.semantic.document.catalog.LocalDocumentPublisher.RemoveRequest;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.document.config.DocumentStorage;
 import com.java.semantic.model.source.SourceContext;
 import java.io.PrintStream;
@@ -26,7 +27,7 @@ import tools.jackson.databind.json.JsonMapper;
 public final class DocumentLocalMain {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final int MAX_ARGUMENTS = 1 + 2 * (DocumentContract.MAX_DOCUMENTS
-            + DocumentContract.MAX_RELATED_CONTEXTS + DocumentContract.MAX_REVISIONS + 3);
+            + DocumentContract.MAX_RELATED_CONTEXTS + 3);
 
     private DocumentLocalMain() { }
 
@@ -40,12 +41,12 @@ public final class DocumentLocalMain {
                 out.println("""
                         Local document Git operations (no remote, token or web server):
                           --document-local update --source repo@fullSHA --file name.md [--file ...]
-                            [--related repo@fullSHA ...] [--review-reference text] [--withdraw fullSHA ...]
-                          --document-local activate --revision fullSHA [--withdraw fullSHA ...]
+                            [--related repo@fullSHA ...] [--review-reference text]
+                          --document-local remove --repository-id repo --file name.md [--file ...] [--review-reference text]
                           --document-local status
                         Required environment: DOCUMENT_REPOSITORY_ID, DOCUMENT_GIT_DIRECTORY,
                           DOCUMENT_PUBLICATION_FILE, DOCUMENT_COLLECTION_PURPOSE (TEST_ONLY or APPROVED).
-                        Local activation is not running-service verification; confirm through Document MCP.
+                        Local publication is not running-service verification; confirm through Document MCP.
                         """);
                 return 0;
             }
@@ -57,7 +58,7 @@ public final class DocumentLocalMain {
             try (LocalDocumentPublisher publisher = new LocalDocumentPublisher(storage)) {
                 Result result = switch (parsed.operation()) {
                     case "update" -> publisher.update(parsed.update().orElseThrow());
-                    case "activate" -> publisher.activate(parsed.revision().orElseThrow(), parsed.withdrawn());
+                    case "remove" -> publisher.remove(parsed.remove().orElseThrow());
                     case "status" -> publisher.status();
                     default -> throw new IllegalArgumentException();
                 };
@@ -65,8 +66,8 @@ public final class DocumentLocalMain {
                 value.put("operation", result.operation());
                 value.put("documentRepositoryId", result.documentRepositoryId());
                 result.candidateRevision().ifPresent(revision -> value.put("candidateRevision", revision));
-                result.activeRevision().ifPresent(revision -> value.put("activeRevision", revision));
-                value.put("retainedRevisions", result.retainedRevisions());
+                result.repositoryId().ifPresent(owner -> value.put("repositoryId", owner));
+                value.put("activeRevisions", result.activeRevisions());
                 value.put("commitCreated", result.commitCreated());
                 value.put("selectionChanged", result.selectionChanged());
                 value.put("serviceVerified", false);
@@ -101,31 +102,33 @@ public final class DocumentLocalMain {
     private static Parsed parse(String[] args) {
         if (args.length == 0 || args.length > MAX_ARGUMENTS) { throw new IllegalArgumentException(); }
         String operation = args[0];
-        if (!Set.of("update", "activate", "status").contains(operation)) { throw new IllegalArgumentException(); }
+        if (!Set.of("update", "remove", "status").contains(operation)) { throw new IllegalArgumentException(); }
         if (operation.equals("status")) {
             if (args.length != 1) { throw new IllegalArgumentException(); }
-            return new Parsed(operation, Optional.empty(), Optional.empty(), List.of());
+            return new Parsed(operation, Optional.empty(), Optional.empty());
         }
         Map<String, List<String>> options = new LinkedHashMap<>();
         Set<String> allowed = operation.equals("update")
-                ? Set.of("--source", "--file", "--related", "--review-reference", "--withdraw")
-                : Set.of("--revision", "--withdraw");
+                ? Set.of("--source", "--file", "--related", "--review-reference")
+                : Set.of("--repository-id", "--file", "--review-reference");
         for (int index = 1; index < args.length; index += 2) {
             if (!allowed.contains(args[index]) || index + 1 >= args.length || args[index + 1].isBlank()) {
                 throw new IllegalArgumentException();
             }
             options.computeIfAbsent(args[index], ignored -> new ArrayList<>()).add(args[index + 1]);
         }
-        List<String> withdrawn = unique(options.getOrDefault("--withdraw", List.of()), DocumentContract.MAX_REVISIONS);
-        for (String revision : withdrawn) { validateRevision(revision); }
-        if (operation.equals("activate")) {
-            String revision = single(options, "--revision", true).orElseThrow();
-            validateRevision(revision);
-            return new Parsed(operation, Optional.empty(), Optional.of(revision), withdrawn);
-        }
-        SourceContext primary = source(single(options, "--source", true).orElseThrow());
         List<String> files = unique(options.getOrDefault("--file", List.of()), DocumentContract.MAX_DOCUMENTS);
         if (files.isEmpty()) { throw new IllegalArgumentException(); }
+        for (String file : files) {
+            if (!file.endsWith(".md") || file.contains("/") || file.contains("\\")
+                    || file.codePoints().anyMatch(Character::isISOControl)) { throw new IllegalArgumentException(); }
+        }
+        if (operation.equals("remove")) {
+            String owner = new RepositoryId(single(options, "--repository-id", true).orElseThrow()).value();
+            return new Parsed(operation, Optional.empty(), Optional.of(new RemoveRequest(owner, files,
+                    single(options, "--review-reference", false))));
+        }
+        SourceContext primary = source(single(options, "--source", true).orElseThrow());
         List<SourceContext> related = new ArrayList<>();
         Set<String> repositories = new HashSet<>();
         repositories.add(primary.repositoryId());
@@ -135,8 +138,8 @@ public final class DocumentLocalMain {
             related.add(context);
         }
         UpdateRequest request = new UpdateRequest(primary, related, files,
-                single(options, "--review-reference", false), withdrawn);
-        return new Parsed(operation, Optional.of(request), Optional.empty(), withdrawn);
+                single(options, "--review-reference", false));
+        return new Parsed(operation, Optional.of(request), Optional.empty());
     }
 
     private static Optional<String> single(Map<String, List<String>> values, String key, boolean required) {
@@ -156,16 +159,11 @@ public final class DocumentLocalMain {
         return new SourceContext(value.substring(0, separator), value.substring(separator + 1));
     }
 
-    private static void validateRevision(String revision) {
-        new DocumentContext("document-local", revision);
-    }
-
     private static String required(Map<String, String> environment, String name) {
         String value = environment.get(name);
         if (Objects.isNull(value) || value.isBlank()) { throw new IllegalArgumentException(); }
         return value;
     }
 
-    private record Parsed(String operation, Optional<UpdateRequest> update, Optional<String> revision,
-            List<String> withdrawn) { }
+    private record Parsed(String operation, Optional<UpdateRequest> update, Optional<RemoveRequest> remove) { }
 }

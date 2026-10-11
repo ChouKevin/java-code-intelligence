@@ -24,144 +24,168 @@ import tools.jackson.databind.JsonNode;
 @Tag("deployed-it")
 class DocumentLocalPublicationJourneyIT extends DocumentJourneySupport {
     @Test
-    void packagedLocalUpdatesRetainPinnedReadsAndRollbackWithoutMovingHead() throws Exception {
+    void packagedLocalUpdatesIsolateOwnersAndNamedRemovalPublishesEmptySelection() throws Exception {
         Path root = Path.of(Objects.requireNonNull(System.getProperty("document.journey.root")));
         Path jar = Path.of(Objects.requireNonNull(System.getProperty("document.journey.jar")));
         Path work = Files.createDirectories(root.resolve("work"));
         Path artifacts = Files.createDirectories(root.resolve("artifacts"));
         String token = UUID.randomUUID().toString();
-        String firstBody = "# HIT First\r\nLocal guide A\r\n# HIT Second\r\nRetained evidence";
-        String secondBody = "# HIT Updated\nLocal guide B";
+        String firstBody = "# HIT First\r\nLocal guide A\r\n# HIT Second\r\nExact evidence";
+        String secondBody = "# HIT Updated\nLocal guide A2";
+        String bBody = "# HIT B\nOther owner\n# HIT More\nOther owner continuation";
         try (DocumentFixture fixture = new DocumentFixture(work.resolve("local-publication/documents"));
                 HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()) {
             fixture.git.getRepository().getConfig().setString("user", null, "name", "Local operator fixture");
             fixture.git.getRepository().getConfig().setString("user", null, "email", "operator@example.test");
             fixture.git.getRepository().getConfig().save();
             Files.createDirectories(fixture.root.resolve("repositories/sample"));
+            Files.createDirectories(fixture.root.resolve("repositories/b"));
             Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), firstBody);
+            Files.writeString(fixture.root.resolve("repositories/b/guide.md"), bBody);
             Files.writeString(fixture.root.resolve("unrelated.txt"), "never included");
             assertThat(command(jar, fixture, work, "--help").exit()).isZero();
             JsonNode firstUpdate = success(command(jar, fixture, work, "update", "--source",
                     "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md"));
-            String first = firstUpdate.path("activeRevision").stringValue();
+            String first = firstUpdate.path("activeRevisions").path("sample").stringValue();
             assertThat(firstUpdate.path("serviceVerified").booleanValue()).isFalse();
-            assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(first);
+            String b = success(command(jar, fixture, work, "update", "--source",
+                    "b@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md")).path("activeRevisions").path("b").stringValue();
             try (OwnedService service = new OwnedService(jar, fixture, token, work.resolve("local-reader.log"))) {
                 service.awaitReady(client);
                 initialize(client, service.uri, token);
-                JsonNode searchA = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
-                assertSuccess(searchA);
-                String cursor = searchA.path("structuredContent").path("page").path("nextCursor").stringValue();
-                assertThat(searchA.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
+                JsonNode global = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
+                JsonNode aPage = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "sample"));
+                JsonNode bPage = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "b"));
+                String globalCursor = global.path("structuredContent").path("page").path("nextCursor").stringValue();
+                String aCursor = aPage.path("structuredContent").path("page").path("nextCursor").stringValue();
+                String bCursor = bPage.path("structuredContent").path("page").path("nextCursor").stringValue();
                 Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), secondBody);
-                JsonNode secondUpdate = success(command(jar, fixture, work, "update", "--source",
+                JsonNode update = success(command(jar, fixture, work, "update", "--source",
                         "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md"));
-                String second = secondUpdate.path("activeRevision").stringValue();
+                String second = update.path("activeRevisions").path("sample").stringValue();
                 assertThat(second).isNotEqualTo(first);
-                JsonNode searchB = call(client, service.uri, token, "search_documents", Map.of("query", "HIT"));
-                assertSuccess(searchB);
-                assertThat(searchB.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
-                JsonNode readB = call(client, service.uri, token, "read_document", readArguments(second, 1));
-                assertSuccess(readB);
-                assertThat(readB.path("structuredContent").path("content").stringValue()).isEqualTo(secondBody);
-                assertThat(readB.path("structuredContent").path("primaryContext").path("revision").stringValue())
-                        .isEqualTo(DocumentFixture.SOURCE_REVISION);
-                JsonNode continued = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", cursor));
-                assertSuccess(continued);
-                assertThat(continued.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
-                assertThat(continued.path("structuredContent").path("items").get(0).path("section").path("startLine").intValue()).isEqualTo(3);
-                JsonNode readA = call(client, service.uri, token, "read_document", readArguments(first, 1));
-                assertSuccess(readA);
-                assertThat(readA.path("structuredContent").path("content").stringValue()).isEqualTo(firstBody);
-                success(command(jar, fixture, work, "activate", "--revision", first));
-                assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(second);
-                JsonNode rolledBack = call(client, service.uri, token, "search_documents", Map.of("query", "HIT"));
-                assertSuccess(rolledBack);
-                assertThat(rolledBack.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
+                assertThat(update.path("activeRevisions").path("b").stringValue()).isEqualTo(b);
+                assertError(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", globalCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                assertError(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "sample", "cursor", aCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                assertSuccess(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "b", "cursor", bCursor)));
+                assertError(call(client, service.uri, token, "read_document", readArguments(first, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                JsonNode bRead = call(client, service.uri, token, "read_document", readArguments("b", b, "repositories/b/guide.md", 1));
+                assertSuccess(bRead);
+                assertThat(bRead.path("structuredContent").path("content").stringValue()).isEqualTo(bBody);
+                byte[] selection = Files.readAllBytes(fixture.publication);
+                for (String[] obsolete : List.of(new String[] {"activate", "--revision", first},
+                        new String[] {"update", "--source", "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md", "--withdraw", first})) {
+                    assertThat(command(jar, fixture, work, obsolete).exit()).isEqualTo(2);
+                    assertThat(Files.readAllBytes(fixture.publication)).isEqualTo(selection);
+                    assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(second);
+                }
                 Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "x".repeat(65537));
-                CommandResult rejected = command(jar, fixture, work, "update", "--source",
-                        "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md");
-                assertThat(rejected.exit()).isEqualTo(2);
-                assertThat(mapper.readTree(rejected.output()).path("code").stringValue()).isEqualTo("DOCUMENT_CAPACITY_EXCEEDED");
+                assertThat(command(jar, fixture, work, "update", "--source", "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md").exit()).isEqualTo(2);
                 assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(second);
-                JsonNode stillA = call(client, service.uri, token, "read_document", readArguments(first, 1));
-                assertSuccess(stillA);
-                assertThat(stillA.path("structuredContent").path("content").stringValue()).isEqualTo(firstBody);
-                JsonNode status = success(command(jar, fixture, work, "status"));
-                assertThat(status.path("activeRevision").stringValue()).isEqualTo(first);
-                assertThat(status.path("candidateRevision").stringValue()).isEqualTo(second);
-                success(command(jar, fixture, work, "activate", "--revision", first, "--withdraw", second));
-                assertError(call(client, service.uri, token, "read_document", readArguments(second, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
-                assertThat(fixture.git.getRepository().resolve(second + "^{commit}").name()).isEqualTo(second);
+                Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), firstBody);
+                String forward = success(command(jar, fixture, work, "update", "--source", "sample@" + "c".repeat(40),
+                        "--file", "guide.md")).path("activeRevisions").path("sample").stringValue();
+                assertThat(forward).isNotIn(first, second);
+                JsonNode restored = call(client, service.uri, token, "read_document", readArguments(forward, 1));
+                assertSuccess(restored);
+                assertThat(restored.path("structuredContent").path("content").stringValue()).isEqualTo(firstBody);
+                JsonNode removed = success(command(jar, fixture, work, "remove", "--repository-id", "sample", "--file", "guide.md"));
+                assertThat(removed.path("activeRevisions").has("sample")).isFalse();
+                assertThat(removed.path("activeRevisions").path("b").stringValue()).isEqualTo(b);
+                assertError(call(client, service.uri, token, "read_document", readArguments(forward, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                assertSuccess(call(client, service.uri, token, "read_document", readArguments("b", b, "repositories/b/guide.md", 1)));
+                success(command(jar, fixture, work, "remove", "--repository-id", "b", "--file", "guide.md"));
+                for (Map<String, Object> arguments : List.<Map<String, Object>>of(Map.of("query", "HIT"), Map.of("query", "HIT", "repositoryId", "b"))) {
+                    JsonNode empty = call(client, service.uri, token, "search_documents", arguments);
+                    assertSuccess(empty);
+                    assertThat(empty.path("structuredContent").path("items").isEmpty()).isTrue();
+                }
+                assertThat(new String(fixture.git.getRepository().open(fixture.git.getRepository().resolve(first + ":" + DocumentFixture.GUIDE)).getBytes(), StandardCharsets.UTF_8)).isEqualTo(firstBody);
                 assertThat(Files.readString(fixture.root.resolve("unrelated.txt"))).isEqualTo("never included");
                 assertThat(fixture.git.status().call().getUntracked()).contains("unrelated.txt");
                 Files.write(artifacts.resolve("document-local-native-acceptance.json"), mapper.writeValueAsBytes(Map.of(
                         "status", "PASS", "firstRevision", first, "secondRevision", second,
-                        "checks", List.of("real packaged offline CLI without token", "selected content preserved",
-                                "new search B, old A cursor/read", "source SHA unchanged", "rollback without HEAD movement",
-                                "oversized candidate preserves A", "explicit withdrawal preserves Git history", "unrelated work preserved"),
+                        "checks", List.of("real packaged offline CLI", "A/global expire while B cursor/read survive", "forward target rewrite",
+                                "oversized candidate preserves map", "explicit removal and empty selection", "Git history and unrelated work preserved"),
                         "agentAcceptance", "NOT_EXECUTED_BY_THIS_JOURNEY")));
             }
         }
     }
 
     @Test
-    void packagedCandidateSurvivesSelectionFailureAndExplicitActivationRecovers() throws Exception {
+    void packagedUpdateAndPartialAndLastRemovalCandidatesRecoverByRepeatingSameOperation() throws Exception {
         Path root = Path.of(Objects.requireNonNull(System.getProperty("document.journey.root")));
         Path jar = Path.of(Objects.requireNonNull(System.getProperty("document.journey.jar")));
         Path work = Files.createDirectories(root.resolve("work"));
-        String token = UUID.randomUUID().toString();
-        try (DocumentFixture fixture = new DocumentFixture(work.resolve("partial-publication/documents"));
-                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()) {
-            fixture.git.getRepository().getConfig().setString("user", null, "name", "Local operator fixture");
-            fixture.git.getRepository().getConfig().setString("user", null, "email", "operator@example.test");
-            fixture.git.getRepository().getConfig().save();
-            Files.createDirectories(fixture.root.resolve("repositories/sample"));
-            Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "# Before\nStill readable\n");
-            String first = success(command(jar, fixture, work, "update", "--source",
-                    "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md"))
-                    .path("activeRevision").stringValue();
-            byte[] selection = Files.readAllBytes(fixture.publication);
-            try (OwnedService service = new OwnedService(jar, fixture, token, work.resolve("partial-reader.log"))) {
-                service.awaitReady(client);
-                initialize(client, service.uri, token);
-                Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "# Candidate\nRecover explicitly\n");
-                Path parent = fixture.publication.getParent();
-                Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(parent);
-                CommandResult failed;
-                try {
-                    Files.setPosixFilePermissions(parent, java.nio.file.attribute.PosixFilePermissions.fromString("r-x------"));
-                    org.junit.jupiter.api.Assumptions.assumeFalse(Files.isWritable(parent),
-                            "Selection permission fault requires an unprivileged POSIX test user");
-                    failed = command(jar, fixture, work, "update", "--source",
-                            "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md");
-                } finally {
-                    Files.setPosixFilePermissions(parent, permissions);
+        for (String operation : List.of("update", "partial-remove", "final-remove")) {
+            String token = UUID.randomUUID().toString();
+            try (DocumentFixture fixture = new DocumentFixture(work.resolve("partial-" + operation + "/documents"));
+                    HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()) {
+                fixture.git.getRepository().getConfig().setString("user", null, "name", "Local operator fixture");
+                fixture.git.getRepository().getConfig().setString("user", null, "email", "operator@example.test");
+                fixture.git.getRepository().getConfig().save();
+                Files.createDirectories(fixture.root.resolve("repositories/sample"));
+                Files.createDirectories(fixture.root.resolve("repositories/b"));
+                Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "# Before\nStill readable\n");
+                String first = success(command(jar, fixture, work, "update", "--source",
+                        "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md")).path("activeRevisions").path("sample").stringValue();
+                if (operation.equals("partial-remove")) {
+                    Files.writeString(fixture.root.resolve("repositories/sample/other.md"), "# Other\nStill readable\n");
+                    first = success(command(jar, fixture, work, "update", "--source", "sample@" + DocumentFixture.SOURCE_REVISION,
+                            "--file", "other.md")).path("activeRevisions").path("sample").stringValue();
                 }
-                assertThat(failed.exit()).isEqualTo(4);
-                JsonNode error = mapper.readTree(failed.output());
-                assertThat(error.path("code").stringValue()).isEqualTo("LOCAL_DOCUMENT_IO_FAILURE");
-                assertThat(error.path("phase").stringValue()).isEqualTo("ACTIVATE");
-                String candidate = error.path("candidateRevision").stringValue();
-                assertThat(candidate).isNotEqualTo(first);
-                assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(candidate);
-                assertThat(Files.readAllBytes(fixture.publication)).isEqualTo(selection);
-                JsonNode oldRead = call(client, service.uri, token, "read_document", readArguments(first, 1));
-                assertSuccess(oldRead);
-                assertThat(oldRead.path("structuredContent").path("content").stringValue()).isEqualTo("# Before\nStill readable\n");
-                JsonNode status = success(command(jar, fixture, work, "status"));
-                assertThat(status.path("activeRevision").stringValue()).isEqualTo(first);
-                assertThat(status.path("candidateRevision").stringValue()).isEqualTo(candidate);
-                JsonNode activated = success(command(jar, fixture, work, "activate", "--revision", candidate));
-                assertThat(activated.path("commitCreated").booleanValue()).isFalse();
-                assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(candidate);
-                JsonNode newRead = call(client, service.uri, token, "read_document", readArguments(candidate, 1));
-                assertSuccess(newRead);
-                assertThat(newRead.path("structuredContent").path("content").stringValue()).isEqualTo("# Candidate\nRecover explicitly\n");
-                Files.write(root.resolve("artifacts/document-local-recovery-acceptance.json"),
-                        mapper.writeValueAsBytes(Map.of("status", "PASS", "priorRevision", first,
-                                "candidateRevision", candidate, "failurePhase", "ACTIVATE",
-                                "recovery", "explicit packaged status/activate; MCP read exact candidate")));
+                Files.writeString(fixture.root.resolve("repositories/b/guide.md"), "# B\nUnchanged owner\n");
+                String b = success(command(jar, fixture, work, "update", "--source", "b@" + DocumentFixture.SOURCE_REVISION,
+                        "--file", "guide.md")).path("activeRevisions").path("b").stringValue();
+                byte[] selection = Files.readAllBytes(fixture.publication);
+                try (OwnedService service = new OwnedService(jar, fixture, token, work.resolve("partial-" + operation + "-reader.log"))) {
+                    service.awaitReady(client);
+                    initialize(client, service.uri, token);
+                    if (operation.equals("update")) { Files.writeString(fixture.root.resolve(DocumentFixture.GUIDE), "# Candidate\nRecover explicitly\n"); }
+                    String[] arguments = operation.equals("update") ? new String[] {"update", "--source", "sample@" + DocumentFixture.SOURCE_REVISION, "--file", "guide.md"}
+                            : new String[] {"remove", "--repository-id", "sample", "--file", "guide.md"};
+                    Path parent = fixture.publication.getParent();
+                    Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(parent);
+                    CommandResult failed;
+                    try {
+                        Files.setPosixFilePermissions(parent, java.nio.file.attribute.PosixFilePermissions.fromString("r-x------"));
+                        org.junit.jupiter.api.Assumptions.assumeFalse(Files.isWritable(parent),
+                                "Selection permission fault requires an unprivileged POSIX test user");
+                        failed = command(jar, fixture, work, arguments);
+                    } finally { Files.setPosixFilePermissions(parent, permissions); }
+                    assertThat(failed.exit()).isEqualTo(4);
+                    JsonNode error = mapper.readTree(failed.output());
+                    assertThat(error.path("code").stringValue()).isEqualTo("LOCAL_DOCUMENT_IO_FAILURE");
+                    assertThat(error.path("phase").stringValue()).isEqualTo("ACTIVATE");
+                    String candidate = error.path("candidateRevision").stringValue();
+                    assertThat(candidate).isNotEqualTo(first);
+                    assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(candidate);
+                    assertThat(Files.readAllBytes(fixture.publication)).isEqualTo(selection);
+                    JsonNode oldRead = call(client, service.uri, token, "read_document", readArguments(first, 1));
+                    assertSuccess(oldRead);
+                    assertThat(oldRead.path("structuredContent").path("content").stringValue()).isEqualTo("# Before\nStill readable\n");
+                    JsonNode status = success(command(jar, fixture, work, "status"));
+                    assertThat(status.path("activeRevisions").path("sample").stringValue()).isEqualTo(first);
+                    assertThat(status.path("activeRevisions").path("b").stringValue()).isEqualTo(b);
+                    assertThat(status.path("candidateRevision").stringValue()).isEqualTo(candidate);
+                    JsonNode recovered = success(command(jar, fixture, work, arguments));
+                    assertThat(recovered.path("commitCreated").booleanValue()).isFalse();
+                    assertThat(recovered.path("selectionChanged").booleanValue()).isTrue();
+                    assertThat(recovered.path("activeRevisions").path("b").stringValue()).isEqualTo(b);
+                    assertThat(fixture.git.getRepository().resolve("HEAD").name()).isEqualTo(candidate);
+                    assertError(call(client, service.uri, token, "read_document", readArguments(first, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                    if (operation.equals("update")) {
+                        JsonNode newRead = call(client, service.uri, token, "read_document", readArguments(candidate, 1));
+                        assertSuccess(newRead);
+                        assertThat(newRead.path("structuredContent").path("content").stringValue()).isEqualTo("# Candidate\nRecover explicitly\n");
+                    } else if (operation.equals("final-remove")) {
+                        assertThat(recovered.path("activeRevisions").has("sample")).isFalse();
+                    } else { assertThat(recovered.path("activeRevisions").path("sample").stringValue()).isEqualTo(candidate); }
+                    assertSuccess(call(client, service.uri, token, "read_document", readArguments("b", b, "repositories/b/guide.md", 1)));
+                    Files.write(root.resolve("artifacts/document-local-" + operation + "-recovery-acceptance.json"),
+                            mapper.writeValueAsBytes(Map.of("status", "PASS", "priorRevision", first, "candidateRevision", candidate,
+                                    "failurePhase", "ACTIVATE", "recovery", "explicit packaged status and same-operation repeat; unchanged B verified through MCP")));
+                }
             }
         }
     }

@@ -34,7 +34,7 @@ class DocumentOperationLifecycleTest {
         String replacement = "# New guide\nnew-only content with updated evidence";
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
             String firstRevision = fixture.commit(Map.of(DocumentFixture.GUIDE, original));
-            fixture.publish(firstRevision, firstRevision);
+            fixture.publish(Map.of("sample", firstRevision));
             DocumentQueryProperties properties = fixture.properties(CollectionPurpose.TEST_ONLY);
             DocumentResultWriter writer = new DocumentResultWriter(fixture.mapper);
             try (GitDocumentLoader loader = new GitDocumentLoader(properties.storage(), writer);
@@ -43,7 +43,7 @@ class DocumentOperationLifecycleTest {
                 DocumentQueryService service = new DocumentQueryService(catalog,
                         new DocumentCursorCodec(fixture.mapper), new DocumentOperationGate());
                 ReadRequest oldRead = new ReadRequest(new DocumentContext(DocumentFixture.DOCUMENT_REPOSITORY,
-                        firstRevision), DocumentFixture.GUIDE, 1);
+                        "sample", firstRevision), DocumentFixture.GUIDE, 1);
                 CountDownLatch readersEntered = new CountDownLatch(2);
                 CountDownLatch firstInterrupted = new CountDownLatch(1);
                 CountDownLatch releaseFirst = new CountDownLatch(1);
@@ -71,11 +71,11 @@ class DocumentOperationLifecycleTest {
                     assertThat(firstFailure.get()).isEqualTo(DocumentFailure.Code.DOCUMENT_TIMEOUT);
 
                     String secondRevision = fixture.commit(Map.of(DocumentFixture.GUIDE, replacement));
-                    fixture.publish(secondRevision, secondRevision);
+                    fixture.publish(Map.of("sample", secondRevision));
                     Future<SearchResult> reloadedSearch = executor.submit(() -> {
                         reloadThread.set(Thread.currentThread());
                         reloadStarted.countDown();
-                        return service.search(new SearchRequest("new-only", 1, Optional.empty()), value -> value);
+                        return service.search(new SearchRequest("new-only", 1, Optional.empty(), Optional.empty()), value -> value);
                     });
                     assertThat(reloadStarted.await(5, TimeUnit.SECONDS)).isTrue();
                     assertThat(awaitTimedWaiting(reloadThread.get())).isTrue();
@@ -88,9 +88,9 @@ class DocumentOperationLifecycleTest {
                     SearchResult newResult = reloadedSearch.get(5, TimeUnit.SECONDS);
                     assertThat(oldResult.content()).isEqualTo(original);
                     assertThat(oldResult.documentContext().documentRevision()).isEqualTo(firstRevision);
-                    assertThat(newResult.documentContext().documentRevision()).isEqualTo(secondRevision);
+                    assertThat(newResult.items().getFirst().documentContext().documentRevision()).isEqualTo(secondRevision);
                     assertThat(newResult.items()).extracting(hit -> hit.path()).containsExactly(DocumentFixture.GUIDE);
-                    ReadResult recovered = service.read(new ReadRequest(newResult.documentContext(), DocumentFixture.GUIDE, 1),
+                    ReadResult recovered = service.read(new ReadRequest(newResult.items().getFirst().documentContext(), DocumentFixture.GUIDE, 1),
                             value -> value);
                     assertThat(recovered.content()).isEqualTo(replacement);
                 } finally {

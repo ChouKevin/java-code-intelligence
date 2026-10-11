@@ -7,29 +7,63 @@ Docker, publication or Git integration. Native success is not external-agent pro
 
 ## Current verification status
 
-The finished feature is preserved in Git `527ccb8`. Detailed dated executions,
-fixture SHAs, failed answers and audits are retrievable from that commit's versions
-of this guide and the [agent checklist](mcp-agent-acceptance.md), with original
-private records retained under `.superpowers/`. They are not new execution tasks.
+Current evidence is recorded below. The historical table is limited to its earlier code/runtime and does not establish the new per-owner contract.
 
-| Evidence boundary | Recorded result and qualification |
+Integration verification ran a fresh full-reactor `clean package`: 401 tests,
+400 passed, one ACL-view platform skip, zero failures/errors. Module counts:
+Model 9, Indexer 172, Source Query 139, Document Query 81.
+Packaged Document CLI/MCP journeys passed all three scenarios with zero skips,
+including real unprivileged publication-failure recovery. Source/Relations
+packaged journeys and external-agent evidence were not rerun by this integration
+gate; their separately recorded proof remains limited to its original scope.
+
+The first integrated Document run had one incidental race-test error-code
+assertion defect. That assertion was removed; subsequent operation-identity,
+HEAD/branch, safe-removal and first-publication cutover repairs passed the final
+ordinary run. A backing-host capacity pause deferred their pre-fix execution;
+the later successful run is not retroactive RED evidence. Verification resumed
+only after headroom recovered, without changing unrelated services or global limits.
+
+Fresh Query-only dual-MCP acceptance used Codex CLI 0.162.1 with explicit
+`--model gpt-6-luna`, isolated read credentials, complete unedited traces/answers,
+and exact source/document locator and claim-support audits. Provider model
+identity was not independently reported. Four scenarios used six invocations:
+
+| Current scenario | Result | MCP calls | Demonstrated boundary |
+| --- | --- | --- | --- |
+| Neutral business navigation | PASS | 21 | Full document navigation, complete unfiltered repository discovery and raw source evidence |
+| A update, stale global/A lookups, unchanged B | PASS_WITH_RECOVERY | 59 | Induced stale errors recovered; original B context/cursor remained valid; Document/Source busy errors were explicitly recovered |
+| Neutral question after genuine source rollback | PASS_WITH_RECOVERY | 28 | Forward document commit, unchanged B, fixed source pins; an out-of-range package citation was explicitly withdrawn and replaced for the same claim |
+| Last A document removed | PASS | 19 | Empty document search led to source evidence, not a claim that the feature disappeared |
+
+The operator also removed the final B document: global/scoped document searches
+succeeded empty while both source policies remained readable. Unrelated working
+bytes and Git history were preserved. Author handoffs remained TEST_ONLY/DRAFT/
+NOT_VERIFIED and required recorded provenance, wording and locator corrections;
+author results are not substitutes for the separate Query runs. Original failures
+and corrections remain private evidence, not retroactively clean passes.
+
+Scoped and whole-branch static review findings were resolved. These local results
+do not constitute deployment approval, model-wide reliability or production sizing.
+
+| Historical evidence boundary | Recorded baseline result (scope limited to its original code, inputs and runtime) |
 | --- | --- |
-| Merged-main clean full reactor | `clean package`: 374 tests, 373 passed, zero failures/errors, one skipped because this Linux filesystem exposes no JDK ACL view. Model: 9; Indexer: 172; Source Query: 139; Document Query: 54. |
-| Packaged native Document/local-publication proof | Three scenarios passed, zero skips: actual CLI/MCP, retained pins, rollback, refusal, withdrawal and commit-success/selection-failure recovery. The POSIX permission fault used an unprivileged runner. |
-| Packaged native Source/Relations proof | Two scenarios passed, zero skips, on the selected unchanged source runtime. |
-| Actual local-document operator | Explicit `gpt-6-luna`, Codex CLI 0.162.1: PASS_WITH_RECOVERY, including two setup detours. Preserved unrelated bytes and accurately reported `serviceVerified:false`. |
-| Independent dual-MCP query | Explicit `gpt-6-luna`, Codex CLI 0.162.1: PASS, nine actual read-only calls with independently pinned source and raw evidence. This narrow run does not newly verify historical/Relations behavior or final-answer document-locator formatting. |
-| Earlier broader document/navigation evidence | Selected current, historical and no-hit dual-MCP cases passed; document update passed with one recovered SOURCE_BUSY. Generation/current/historical/thin-navigation evidence is scoped to its recorded inputs and runtime. Rejected answers remain failures. |
-| Earlier citation and Relations limits | Numbered source presentation has native proof, but the earlier module-aware guide's original model citation gate remains unaccepted. The accepted Relations Luna run preceded final-review production corrections; final ordinary/native checks cover those corrections, not a new Luna execution. Its historical Query executable hash was not captured. |
-| Review | Feature whole-branch review and the documentation consolidation reviews closed with no actionable findings. Review is not deployment acceptance. |
+| Historical merged-main clean full reactor | `clean package`: 374 tests, 373 passed, zero failures/errors, one skipped because this Linux filesystem exposes no JDK ACL view. Model: 9; Indexer: 172; Source Query: 139; Document Query: 54. This predates latest-document-navigation. |
+| Historical packaged native Document/local-publication proof | Three former-contract scenarios passed, zero skips: actual CLI/MCP, prior exact pins, rollback, refusal, withdrawal, and commit-success/selection-failure recovery. The POSIX permission fault used an unprivileged runner. Not evidence for format-2 owner maps, owner-scoped cursors, final-file removal, or new recovery semantics. |
+| Historical packaged native Source/Relations proof | Two scenarios passed, zero skips, on the selected unchanged source runtime. Source retention/historical behavior remains a separate contract. |
+| Historical local-document operator run | Explicit `gpt-6-luna`, Codex CLI 0.162.1: PASS_WITH_RECOVERY, including two setup detours. Preserved unrelated bytes and accurately reported `serviceVerified:false`; not latest-document operator acceptance. |
+| Historical independent dual-MCP query | Explicit `gpt-6-luna`, Codex CLI 0.162.1: PASS, nine actual read-only calls with independently pinned source and raw evidence. This narrow run does not newly verify the latest owner-map behavior, historical/Relations behavior, or final-answer document-locator formatting. |
+| Earlier broader document/navigation evidence | Results are limited to the recorded old inputs and scenarios; rejected answers remain failures. They do not establish latest-document-navigation acceptance. |
+| Historical citation and Relations limits | Numbered source presentation has prior native proof, but the earlier module-aware guide's original model citation gate remains unaccepted. The accepted Relations Luna run preceded final-review production corrections; later ordinary/native checks do not constitute a new Luna execution. Its historical Query executable hash was not captured. |
+| Review | Earlier feature reviews are historical review evidence, not acceptance of this milestone or deployment. |
 
-The initial non-clean integration run found 17 obsolete generated test classes
+The initial non-clean integration run recorded 17 obsolete generated test classes
 whose constructors threw unresolved-compilation errors. Cleaning generated build
 output resolved that failure; no production or test source was changed or skipped.
 The freshly packaged `--document-local --help` also exited successfully with an
 empty configuration/token environment. This help-path smoke is not running-service
-adoption evidence. The prose-only cleanup passed local-reference checks and
-read-only review; no new image, CI or external-agent acceptance was run.
+adoption evidence. A prior prose-only cleanup passed local-reference checks and
+read-only review; no new image, CI or external-agent acceptance was run for it.
 
 Images, CI routing execution, deployed TLS, private production Git, supported-ACL
 execution, separate-UID document reader deployment, idle-session/multi-user
@@ -214,7 +248,7 @@ Run only selected, authorized lanes serially with bounded JVMs.
 | --- | --- | --- |
 | Ordinary reactor | `mvn --batch-mode --no-transfer-progress -Dsource.test.rg="$SOURCE_TEST_RG" '-DargLine=-Xms64m -Xmx512m -XX:ActiveProcessorCount=2' -DforkCount=1 test` | Ordinary Model/Source/index/Document contracts; deployed journeys excluded |
 | Source/Relations native | `SOURCE_TEST_RG=/absolute/path/to/rg scripts/test-source-mcp.sh` | Clean packaged real Git/rg/SQLite, separate JVMs, HTTP/MCP parity and raw source |
-| Document native | `MAVEN_CMD=/absolute/path/to/maven-3.9/bin/mvn bash scripts/test-document-mcp.sh` | Packaged local CLI/catalog and stateless MCP, retention/recovery and Git bytes |
+| Document native | `MAVEN_CMD=/absolute/path/to/maven-3.9/bin/mvn bash scripts/test-document-mcp.sh` | Future packaged per-owner CLI/map and stateless MCP checks: owner isolation, mixed hits/cursors, update/remove including final owner, empty map, same-operation recovery and Git bytes |
 | Indexer image | `docker build -f Dockerfile.indexer -t java-source-indexer:acceptance .` | Writer artifact, parser/Symbol Solver/SQLite/private JNI |
 | Source Query image | `docker build -f Dockerfile.query -t java-source-query:acceptance .` | Read-only source/index reader with rg/SQLite/private JNI |
 | Started images | `QUERY_IMAGE=java-source-query:acceptance INDEXER_IMAGE=java-source-indexer:acceptance scripts/test-source-images.sh` | Actual UID/mount locks, source/Relations reads and GC; requires both builds first |
@@ -274,9 +308,11 @@ Source Query must read published revisions after Indexer stops; registration or 
 orphan directory never authorizes source reads.
 
 Check Source/Indexer wire contracts and independent Document wire contracts;
-an HTTP-only response or skipped test is not MCP/model acceptance. Document release
-also checks actual catalog adoption, coherent independent document/source pins,
-last-good rejection, retained reads/withdrawal and supported reader permissions.
-Formal document approval/publication and deployment capacity require their own
-authorization and evidence. Recovery/startup/rollback contracts live in
+an HTTP-only response or skipped test is not MCP/model acceptance. Document
+release checks actual per-owner map adoption, mixed-owner document/source pins,
+owner-scoped versus global cursors, last-good rejection, named/final removal,
+same-operation recovery and supported reader permissions. Source retention is
+separate and unchanged by this milestone. Formal document approval/publication
+and deployment capacity require their own authorization and evidence. Recovery,
+startup and rollback contracts live in
 [Source MCP operations](source-mcp.md) and [Document MCP operations](document-mcp.md).

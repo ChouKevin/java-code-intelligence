@@ -41,7 +41,7 @@ class DocumentMcpContractTest {
         content = "# Evidence\r\nneedle literal.* 文\r\nQualification: source must be verified.\r\n"
                 + "# Other\r\nneedle historical context\r\n";
         revision = fixture.commit(Map.of(DocumentFixture.GUIDE, content));
-        fixture.publish(revision, revision);
+        fixture.publish(Map.of("sample", revision));
         application = new SpringApplicationBuilder(DocumentQueryApplication.class).run(
                 "--server.port=0", "--document.repository-id=" + DocumentFixture.DOCUMENT_REPOSITORY,
                 "--document.git-directory=" + fixture.root.resolve(".git"),
@@ -88,37 +88,119 @@ class DocumentMcpContractTest {
     }
 
     @Test
-    void exactPinsSurviveActivationAndFailExplicitlyAfterWithdrawal() throws Exception {
-        JsonNode first = result("search_documents", Map.of("query", "needle", "limit", 1)).path("structuredContent");
-        String cursor = first.path("page").path("nextCursor").stringValue();
-        String second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# New\nneedle D2\n"));
-        fixture.publish(second, revision, second);
-        JsonNode continued = result("search_documents", Map.of("query", "needle", "limit", 1, "cursor", cursor));
-        assertThat(continued.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(revision);
-        assertThat(result("search_documents", Map.of("query", "needle")).path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
-        fixture.publish(second, second);
-        assertError(result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
-                "documentRevision", revision), "path", DocumentFixture.GUIDE, "sectionStartLine", 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+    void scopedSearchAcceptsBusinessRepositoryAndReturnsOnlyItsHits() throws Exception {
+        byte[] sample = content.getBytes(StandardCharsets.UTF_8);
+        String otherPath = "repositories/billing/guide.md";
+        byte[] billing = "# Billing\nneedle billing-only\n".getBytes(StandardCharsets.UTF_8);
+        Map<String, Object> billingRow = fixture.row(otherPath, billing);
+        billingRow.put("primaryContext", Map.of("repositoryId", "billing", "revision", "b".repeat(40)));
+        String selected = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, sample, otherPath, billing),
+                List.of(fixture.row(DocumentFixture.GUIDE, sample), billingRow));
+        fixture.publish(Map.of("sample", selected, "billing", selected));
+
+        JsonNode response = result("search_documents", Map.of("query", "needle", "repositoryId", "sample"));
+
+        assertRepresentations(response);
+        assertThat(response.path("isError").asBoolean()).isFalse();
+        JsonNode search = response.path("structuredContent");
+        assertThat(search.path("repositoryId").stringValue()).isEqualTo("sample");
+        assertThat(search.path("items").size()).isEqualTo(2);
+        for (JsonNode hit : search.path("items")) {
+            assertThat(hit.path("path").stringValue()).isEqualTo(DocumentFixture.GUIDE);
+            assertThat(hit.path("documentContext").path("repositoryId").stringValue()).isEqualTo("sample");
+            assertThat(hit.path("primaryContext").path("repositoryId").stringValue()).isEqualTo("sample");
+        }
+    }
+
+    @Test
+    void mixedOwnerWireResultsExpireGlobalAndChangedOwnerButKeepOtherOwnerReadable() throws Exception {
+        String billingPath = "repositories/billing/guide.md";
+        byte[] billing = "# Billing\nneedle B1\n# More\nneedle B1 more\n".getBytes(StandardCharsets.UTF_8);
+        byte[] sample = content.getBytes(StandardCharsets.UTF_8);
+        Map<String, Object> billingRow = fixture.row(billingPath, billing);
+        billingRow.put("primaryContext", Map.of("repositoryId", "billing", "revision", "b".repeat(40)));
+        String first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, sample, billingPath, billing),
+                List.of(fixture.row(DocumentFixture.GUIDE, sample), billingRow));
+        fixture.publish(Map.of("sample", first, "billing", first));
+        JsonNode global = result("search_documents", Map.of("query", "needle", "limit", 1)).path("structuredContent");
+        JsonNode b = result("search_documents", Map.of("query", "needle", "limit", 1, "repositoryId", "billing")).path("structuredContent");
+        JsonNode a = result("search_documents", Map.of("query", "needle", "limit", 1, "repositoryId", "sample")).path("structuredContent");
+        assertError(result("search_documents", Map.of("query", "needle", "limit", 1, "repositoryId", "billing",
+                "cursor", global.path("page").path("nextCursor").stringValue())), "INVALID_ARGUMENT");
+        assertError(result("search_documents", Map.of("query", "needle", "limit", 1,
+                "cursor", b.path("page").path("nextCursor").stringValue())), "INVALID_ARGUMENT");
+        assertError(result("search_documents", Map.of("query", "different", "limit", 1, "repositoryId", "billing",
+                "cursor", b.path("page").path("nextCursor").stringValue())), "INVALID_ARGUMENT");
+        assertError(result("search_documents", Map.of("query", "needle", "limit", 2, "repositoryId", "billing",
+                "cursor", b.path("page").path("nextCursor").stringValue())), "INVALID_ARGUMENT");
+        assertThat(global.has("documentContext")).isFalse();
+        assertThat(global.path("documentRepositoryId").stringValue()).isEqualTo(DocumentFixture.DOCUMENT_REPOSITORY);
+        JsonNode bHit = global.path("items").get(0);
+        byte[] updated = "# New\nneedle A2\n".getBytes(StandardCharsets.UTF_8);
+        String second = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, updated, billingPath, billing),
+                List.of(fixture.row(DocumentFixture.GUIDE, updated), billingRow));
+        fixture.publish(Map.of("sample", second, "billing", first));
+        assertError(result("search_documents", Map.of("query", "needle", "limit", 1,
+                "cursor", global.path("page").path("nextCursor").stringValue())), "DOCUMENT_REVISION_NOT_AVAILABLE");
+        assertError(result("search_documents", Map.of("query", "needle", "limit", 1, "repositoryId", "sample",
+                "cursor", a.path("page").path("nextCursor").stringValue())), "DOCUMENT_REVISION_NOT_AVAILABLE");
+        JsonNode continued = result("search_documents", Map.of("query", "needle", "limit", 1, "repositoryId", "billing",
+                "cursor", b.path("page").path("nextCursor").stringValue()));
+        assertRepresentations(continued);
+        assertThat(continued.path("isError").asBoolean()).isFalse();
+        JsonNode read = result("read_document", Map.of("documentContext", bHit.path("documentContext"), "path", billingPath, "sectionStartLine", 1));
+        assertThat(read.path("structuredContent").path("content").stringValue()).isEqualTo(new String(billing, StandardCharsets.UTF_8));
+        assertError(result("read_document", Map.of("documentContext", a.path("items").get(0).path("documentContext"),
+                "path", DocumentFixture.GUIDE, "sectionStartLine", 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+        JsonNode mixed = result("search_documents", Map.of("query", "needle"));
+        assertRepresentations(mixed);
+        assertThat(mixed.path("structuredContent").path("items").size()).isEqualTo(3);
+        assertThat(fixture.mapper.writeValueAsBytes(mixed).length).isLessThanOrEqualTo(DocumentContract.MAX_RESULT_BYTES);
+        JsonNode tools = json(rpc("tools/list", Map.of(), true)).path("result").path("tools");
+        JsonNode searchSchema = tools.get(0).path("outputSchema");
+        JsonNode actual = mixed.path("structuredContent");
+        assertSchemaFields(actual, searchSchema.path("oneOf").get(0));
+        assertThat(actual.has("repositoryId")).isFalse();
+        for (JsonNode hit : actual.path("items")) {
+            assertSchemaFields(hit, searchSchema.path("$defs").path("hit"));
+            assertSchemaFields(hit.path("documentContext"), searchSchema.path("$defs").path("documentContext"));
+            assertSchemaFields(hit.path("documentContext"), tools.get(1).path("inputSchema").path("properties").path("documentContext"));
+            assertThat(hit.path("documentContext").path("repositoryId").stringValue()).isEqualTo(hit.path("primaryContext").path("repositoryId").stringValue());
+        }
+        assertSchemaFields(read.path("structuredContent"), tools.get(1).path("outputSchema").path("oneOf").get(0));
     }
 
     @Test
     void strictArgumentsAndUnavailableSelectorsReturnSafeMatchingRepresentations() throws Exception {
         Map<String, Object> explicitNull = new LinkedHashMap<>();
         explicitNull.put("query", "needle"); explicitNull.put("limit", null);
+        Map<String, Object> nullOwner = new LinkedHashMap<>();
+        nullOwner.put("query", "needle"); nullOwner.put("repositoryId", null);
+        assertError(result("search_documents", nullOwner), "INVALID_ARGUMENT");
+        for (String invalidOwner : List.of("", "../sample", "Sample", "a".repeat(65))) {
+            assertError(result("search_documents", Map.of("query", "needle", "repositoryId", invalidOwner)), "INVALID_ARGUMENT");
+        }
+        JsonNode absent = result("search_documents", Map.of("query", "needle", "repositoryId", "absent"));
+        assertRepresentations(absent);
+        assertThat(absent.path("isError").asBoolean()).isFalse();
+        assertThat(absent.path("structuredContent").path("repositoryId").stringValue()).isEqualTo("absent");
+        assertThat(absent.path("structuredContent").path("items").isEmpty()).isTrue();
+        assertError(result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
+                "documentRevision", revision), "path", DocumentFixture.GUIDE, "sectionStartLine", 1)), "INVALID_ARGUMENT");
         for (Map<String, Object> invalid : List.<Map<String, Object>>of(explicitNull, Map.of("query", "needle", "limit", 1.5),
                 Map.of("query", "needle", "regex", true), Map.of("query", " "), Map.of("query", 7),
                 Map.of("query", "needle", "cursor", "not-a-cursor"))) {
             assertError(result("search_documents", invalid), "INVALID_ARGUMENT");
         }
         assertError(result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
-                "documentRevision", revision, "sourceRevision", DocumentFixture.SOURCE_REVISION),
+                "repositoryId", "sample", "documentRevision", revision, "sourceRevision", DocumentFixture.SOURCE_REVISION),
                 "path", DocumentFixture.GUIDE, "sectionStartLine", 1)), "INVALID_ARGUMENT");
         assertError(result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
-                "documentRevision", revision), "path", DocumentFixture.GUIDE, "sectionStartLine", 1.5)), "INVALID_ARGUMENT");
+                "repositoryId", "sample", "documentRevision", revision), "path", DocumentFixture.GUIDE, "sectionStartLine", 1.5)), "INVALID_ARGUMENT");
         assertError(result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
-                "documentRevision", revision), "path", "navigation-catalog.json", "sectionStartLine", 1)), "DOCUMENT_NOT_FOUND");
+                "repositoryId", "sample", "documentRevision", revision), "path", "navigation-catalog.json", "sectionStartLine", 1)), "DOCUMENT_NOT_FOUND");
         assertError(result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
-                "documentRevision", revision), "path", DocumentFixture.GUIDE, "sectionStartLine", 2)), "DOCUMENT_SECTION_NOT_FOUND");
+                "repositoryId", "sample", "documentRevision", revision), "path", DocumentFixture.GUIDE, "sectionStartLine", 2)), "DOCUMENT_SECTION_NOT_FOUND");
     }
 
     @Test
@@ -154,9 +236,9 @@ class DocumentMcpContractTest {
         String reference = "review-\"\\".repeat(2000);
         row.put("reviewReference", reference);
         String selected = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, bytes), List.of(row));
-        fixture.publish(selected, selected);
+        fixture.publish(Map.of("sample", selected));
         JsonNode read = result("read_document", Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
-                "documentRevision", selected), "path", DocumentFixture.GUIDE, "sectionStartLine", 1));
+                "repositoryId", "sample", "documentRevision", selected), "path", DocumentFixture.GUIDE, "sectionStartLine", 1));
         assertRepresentations(read);
         assertThat(read.path("structuredContent").path("content").stringValue()).isEqualTo(escaped);
         assertThat(read.path("structuredContent").path("reviewReference").stringValue()).isEqualTo(reference);
@@ -191,6 +273,16 @@ class DocumentMcpContractTest {
         assertThat(response.has("error")).isFalse();
         return response.path("result");
     }
+    private void assertSchemaFields(JsonNode actual, JsonNode schema) {
+        assertThat(schema.path("additionalProperties").asBoolean(true)).isFalse();
+        for (String name : actual.propertyNames()) {
+            assertThat(schema.path("properties").has(name)).as("serialized field %s is allowed by live schema", name).isTrue();
+        }
+        for (JsonNode required : schema.path("required")) {
+            assertThat(actual.has(required.stringValue())).as("serialized required field %s", required.stringValue()).isTrue();
+        }
+    }
+
     private void assertRepresentations(JsonNode result) {
         assertThat(fixture.mapper.readTree(result.path("content").get(0).path("text").stringValue())).isEqualTo(result.path("structuredContent"));
     }

@@ -43,5 +43,5 @@ cp -- "$jar" "$run_root/work/runtime/document-query.jar"
   -Dtest=DocumentMcpJourneyIT,DocumentLocalPublicationJourneyIT -Dsurefire.failIfNoSpecifiedTests=false \
   -Ddocument.journey.root="$run_root" \
   -Ddocument.journey.jar="$run_root/work/runtime/document-query.jar" test
-echo 'Native document MCP journeys completed: reader isolation, real local CLI publication, pinned pagination/read, rollback, withdrawal and restart.'
+echo 'Native document MCP journeys completed: owner isolation, scoped/global pagination, named and final removal, candidate recovery and restart.'
 echo 'This is packaged-process proof, not external-agent acceptance; GPT 6 Luna requires a separate recorded dual-MCP run.'

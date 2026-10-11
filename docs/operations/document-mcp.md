@@ -1,23 +1,24 @@
 # Document MCP operations
 
-The `document-query` executable provides offline local-Git document operations and an independent read-only MCP server for pregenerated navigation. The local command generates the catalog, commits explicitly named Markdown and atomically activates a publication selection; operators do not hand-author a catalog. The server reads exact Git objects and that external selection. It never fetches, checks out, builds target projects, runs an LLM, prepares source/indexes, publishes documents or deletes Git objects. Elasticsearch, arbitrary historical document search and a publisher API are not provided.
+The `document-query` executable provides offline local-Git `update`, named `remove`, and `status` operations plus an independent read-only MCP server for pregenerated navigation. The writer generates the format-1 catalog, commits explicitly named Markdown, and atomically publishes a format-2 per-owner selection map; operators do not hand-author either JSON file. The server reads only the exact Git commit selected for each business-repository owner. It never fetches, checks out, builds target projects, runs an LLM, prepares source/indexes, authors documents, or deletes Git objects. Elasticsearch, MCP historical-document lookup and a publisher API are not provided.
 
 Navigation is always `NOT_VERIFIED`. Document provenance, operator approval and source readiness are different facts. Business conclusions still require exact-revision Source Query evidence. Read the [query skill](../../skills/query-business-code/SKILL.md) and [central author handoff](repository-context-prompt.md#central-document-handoff).
 
 ## Local Git document commands
 
-Start with the offline workflow below; artifact packaging and read-only server
-launch are in [Deployment boundary](#deployment-boundary). Update named Markdown,
-inspect local status, then separately confirm actual Document MCP adoption.
+Use the offline workflow below; artifact packaging and read-only server launch
+are in [Deployment boundary](#deployment-boundary). Operators update or remove
+only authorized named files, inspect local `status`, then separately verify
+actual Document MCP adoption.
 
 Use [manage-repository](../../skills/manage-repository/SKILL.md) to route source,
-index, drafting and document-update operations. First obtain approval for the
-local document namespace, named Markdown, exact primary/related source contexts
-and the intended write/activation. Formal APPROVED content requires exact-content
-human review; TEST_ONLY drafting/use requires current explicit user approval,
-not an old fixture's standing grant. Document updates need no business-repo
-preparation, remote, network access or Query token. The CLI exits before
-Spring/web startup; the MCP server remains read-only.
+index, authoring and document operations. Obtain approval for the local document
+namespace, named Markdown, exact source contexts and intended update/removal.
+Formal `APPROVED` updates require exact-content/source-identity human review;
+named removals require explicit removal approval. `TEST_ONLY` drafting/use
+requires current explicit user approval, not an old fixture's standing grant.
+Document commands need no business-repo preparation, remote, network access or
+Query token. The CLI exits before Spring/web startup; the MCP server is read-only.
 
 For this command, initialize an ordinary local Git repository with `git init -b main`
 and configure its **local** `user.name` and `user.email`. No remote is allowed.
@@ -41,50 +42,92 @@ owner/group/mode for this CLI's reader-access policy: standard JDK providers do
 not expose extended POSIX ACLs, so **ACL-only reader namespaces are unsupported**.
 The command neither grants public access nor verifies another service UID.
 
-Use `APPROVED` only with the separately approved exact document content and source
-identities. TEST_ONLY fixtures do not acquire production approval. Place Markdown
-directly in `repositories/<sourceRepositoryId>/` in the document worktree.
-`--file` is a filename in that directory, not an arbitrary path.
+Use `APPROVED` only after the exact content and source identities have been
+approved; an `APPROVED` removal also needs its explicit removal reference.
+`TEST_ONLY` does not confer production approval. Place Markdown directly in
+`repositories/<primaryRepositoryId>/` in the document worktree. `--file` is a
+filename in that owner directory, not an arbitrary path.
 
 ```bash
 java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local --help
 java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local \
   update --source "example@${FULL_SOURCE_SHA}" --file description.md --file guide.md
-java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local status
 java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local \
-  activate --revision "${FULL_DOCUMENT_SHA}"
+  remove --repository-id example --file obsolete-guide.md
+java -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar --document-local status
 ```
 
-`update` accepts repeated `--related <repositoryId>@<fullSourceSha>` and
-`--withdraw <fullDocumentSha>`, plus one `--review-reference <text>`; APPROVED
-updates require that reference. `activate` also accepts repeated `--withdraw`.
-Source and document SHAs are separate full lowercase 40-character identities.
-`--help` needs no configuration; `status` does not create a publication.
+`update` accepts repeated `--related <repositoryId>@<fullSourceSha>` and one
+`--review-reference <text>`; formal `APPROVED` updates require that reference.
+`remove` accepts `--repository-id <repo>`, repeated `--file <basename.md>`, and
+optional `--review-reference <text>`; it does not require a new source SHA.
+Formal removals require explicit approval. Source and document SHAs are separate
+full lowercase 40-character identities. `--help` needs no configuration;
+`status` reports the Git HEAD candidate and effective owner map.
 
-The command generates `navigation-catalog.json`; it is not an author input.
-It validates the complete retained selection with the reader's admission rules,
-commits raw named files and catalog,
-then atomically replaces the external selection. It refuses any pre-existing staged
-changes or manual catalog edits. Unrelated tracked/untracked working files and
-unselected committed catalog entries remain untouched. Hooks, clean filters,
-checkout/reset/clean and Git GC do not run. An unchanged update reuses its commit.
+The command generates `navigation-catalog.json` (format 1) and validates the
+complete format-2 selection map before publishing. Each business repository has
+one effective document commit for its group of named description/guide files.
+The map is independent of Git HEAD: advancing A does not advance B's pointer.
+Unselected rows/files and unrelated working files remain untouched. No catalog
+or selection JSON is manually maintained.
 
-At most eight revisions may be retained. A ninth refuses unless explicit
-`--withdraw` choices make room; there is no automatic eviction. Withdrawal changes
-reader membership, not Git history. Activating an older retained commit does not
-move the Git branch. Keep retained objects protected from unrelated external GC.
+The writer preserves Git parent history, index/ref compare-and-swap, same-
+filesystem selection replacement, locks and supported permissions. It refuses
+pre-existing staged changes, manual catalog changes, dirty content that would
+be overwritten/discarded, unsafe paths, foreign ownership and unsupported
+mixed Git state. A named removal may include an already-missing working file
+only when its tracked/catalogued removal is explicitly named. Removing the final
+document removes that owner from the map; removing the last owner publishes a
+valid empty map. Neither operation deletes Git history or changes Source state.
 
-Success emits one JSON result with `serviceVerified:false`: it proves local state,
-not what a running MCP instance has loaded. Verify through actual `search_documents`
-and `read_document`, checking document SHA, source contexts and publication status.
-Exit codes are 0 success, 2 invalid/admission refusal, 3 busy/concurrent change,
-4 I/O failure. Errors include a phase and, when available, the candidate SHA.
-If commit succeeds but activation fails, old selection remains; inspect `status`
-and explicitly `activate --revision <candidate>` after resolving the reported cause.
-Do not reset other edits or automatically repeat an uncertain update. A writer
-lock left by a killed process requires proving that no writer is alive before
-operator-authorized removal; do not delete another process's lock.
+Removal requires secure directory streams, stable file identities and POSIX
+private-directory access; unsupported providers fail closed. It holds a no-follow
+parent handle and captures the target in a mode-0700
+`repositories/<owner>/.document-removal-<unique>/captured.md` before validating
+identity/content and unlinking. Unexpected captures are retained, not overwritten
+or discarded. If an ancestor was renamed, the capture can remain inside that
+original parent. Inspect both the original and retained paths and preserve both
+versions before an authorized, non-clobber recovery; never blanket-clean these
+directories as temporary scaffolds. Successful validated removal cleans its
+capture directory.
 
+This relies on a protected namespace and trusted operators: same-UID actors must
+not maliciously alter private captures or still-open captured files. Rename does
+not revoke existing writable descriptors. Java has no directory-handle mkdir or
+atomic conditional unlink/restore; setup races can leave an empty temporary
+directory, and the command does not promise an all-actor filesystem transaction
+or an atomic transaction spanning Git, index, working files and selection.
+
+Mutation results identify the operation and affected owner, the Git
+`candidateRevision`, the resulting owner-to-commit map, `commitCreated`,
+`selectionChanged`, and `serviceVerified:false`. `status` omits an affected owner
+and reports the Git HEAD candidate separately from the effective map. No single
+document commit identifies the whole collection.
+
+If commit, file synchronization and catalog generation succeed but selection
+replacement fails, the old map remains effective. Inspect `status`, Git and
+actual MCP, resolve the cause, then explicitly repeat the same authorized
+`update` or `remove` with unchanged inputs. A same-HEAD update reuses its
+committed candidate instead of making an empty duplicate. For a pending removal,
+the named file/row can be absent from the candidate while still present in the
+old effective owner publication; replay that same removal to publish the map.
+Never pass an arbitrary prior commit, blindly retry uncertain work, or describe
+a later changed-input candidate as recovery. If the operation completed and its
+target is absent from both the effective map and Git, use `status` to resolve
+the outcome; an unknown name is not a removal request.
+
+Every effective owner change must be covered by the explicitly named files,
+including a fresh operation after an earlier failed publication. Reusing a
+pending candidate also requires the complete original operation/input identity,
+including unchanged named files and the exact approval reference; the writer
+records its digest in generated Git commit metadata. A subset or unrelated
+operation cannot adopt pending changes. HEAD/branch, catalog and selection
+changes during recovery refuse; inspect rather than bypassing the checks.
+
+Failures preserve unrelated edits and report phase/candidate when available.
+Do not reset or clean the worktree. A lock left by a killed writer may be
+removed only after proving no writer is alive and obtaining operator authority.
 
 ## Deployment boundary
 
@@ -168,41 +211,81 @@ the digest computed from the exact document bytes; never send these examples.
 }
 ```
 
-## Selection, replacement and retention
+## Selection, per-owner publication and cutover
 
-The external selection is a strict JSON object with integer `formatVersion:1`, matching `documentRepositoryId`, a full `activeRevision`, and a nonempty unique `retainedRevisions` array containing active. All revisions are exact Git commits; branch names, abbreviated SHAs and inferred HEAD are not accepted.
-
-Illustrative external selection, with unrelated example document hashes:
+The external selection is strict JSON format 2:
 
 ```json
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "documentRepositoryId": "navigation",
-  "activeRevision": "dddddddddddddddddddddddddddddddddddddddd",
-  "retainedRevisions": [
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "dddddddddddddddddddddddddddddddddddddddd"
+  "repositories": [
+    {
+      "repositoryId": "member-a",
+      "documentRevision": "dddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "repositoryId": "member-b",
+      "documentRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
   ]
 }
 ```
 
-Both actual retained commits must exist and validate. The example source SHA
-`aaaa…` is not either document SHA and does not become source current.
+The example commits are illustrative, not admitted Git objects. The exact
+selection fields are `formatVersion`, `documentRepositoryId`, and `repositories`;
+each unique owner entry contains exactly `repositoryId` and `documentRevision`.
+Every listed owner must have at least one admitted document at that exact full
+Git commit. `repositories: []` is valid and represents an empty document service.
+Unknown fields, duplicates, legacy shapes, abbreviated IDs and branch names are
+rejected. The generated `navigation-catalog.json` remains format 1; it indexes
+named files in a Git tree and is not an additional business overview document.
 
-The local command performs the publication protocol; users need not hand-edit JSON:
+There is one central local Git repository, but each business repository owns an
+independent latest document group. A commit that updates A changes only A's map
+entry; B may remain selected at an older commit, even when Git HEAD has moved.
+For each selected commit the reader admits only that owner's rows and blobs.
+`path` ownership must match `primaryContext.repositoryId`; `relatedContexts`
+are provenance clues and never grant read ownership or trigger another owner's
+publication. Git history keeps old commits, but an old commit not selected for
+that owner is not historical Document MCP membership.
 
-1. Make validated Git objects and generated catalog bytes available.
-2. Write the complete admitted selection to a sibling temporary file.
-3. Atomically replace the configured selection on the same filesystem.
-4. Verify actual MCP identity and `publicationStatus`; local replacement alone is not service acceptance.
+The reader atomically validates/replaces the complete map and reuses unchanged
+owner/commit snapshots. Its limits apply once across the selected owner union.
+A malformed candidate keeps the actual last-good map with
+`publicationStatus: UPDATE_REJECTED`; a cold start with an invalid selection
+fails closed. A valid empty map starts and serves successful empty searches.
+Existing bounded read leases cover result materialization; after replacement,
+a stale owner read fails explicitly instead of silently switching versions.
 
-The service observes the bounded selection on each operation. Unchanged accepted bytes reuse immutable snapshots. Changed selection acquires a fair exclusive catalog lock, waits for all old read leases to drain, re-observes the selection, builds/reuses every selected revision, and rechecks the exact selection bytes before activation. Readers hold leases through synchronous bounded result materialization. The writer downgrades its lock into a read lease without an activation gap. At most current plus one candidate full state are constructed; a third publication waits, rather than retaining arbitrarily many leased states. Closed leases drop their whole-state references.
+An A update, addition, or removal changes the global cursor fingerprint, so an
+old global continuation returns `DOCUMENT_REVISION_NOT_AVAILABLE`. A scoped B
+cursor remains usable unless B's effective commit changes. A B hit already
+returned from a global page remains readable after A changes, because its full
+context still names B's unchanged effective commit. An old A context fails even
+if its Git commit still exists or is selected for another owner. A true owner
+no-op changes no effective pointer and invalidates neither scope. Scope, query,
+limit and cursor authentication errors remain `INVALID_ARGUMENT`; process
+restart retains existing process-secret cursor invalidation.
 
-If a running service cannot admit an update, it serves its actual last-good identities with `publicationStatus: UPDATE_REJECTED` and a sanitized `publicationErrorCode`. It does not pretend the requested new revision was published. A selection changing again during validation is rejected for that operation; the next operation observes the new bytes. Rejected selections are retried on later operations, so restoring a missing object can recover without changing the selection bytes. There is no permanent negative cache or mtime-only shortcut.
+Legacy format-1 whole-collection selections and ownerless document contexts are
+not compatible. For any separately authorized deployment cutover, preserve the
+central Git history and existing selection, create a fresh selection path,
+explicitly publish each intended owner, verify the new reader, and only then
+switch the named service under separate authority. Existing service settings and
+data are not migrated or reset automatically. The former activate/withdraw
+commands and old active/retained selection shape are cutover/history only, not
+current operator workflows. Invalid selection after restart fails closed.
 
-Startup/restart reconstructs only the configured selection. An invalid selection after restart fails closed; the previous process's in-memory last-good state is not durable recovery. Restore a valid selection before restarting.
-
-Retained revisions remain eligible for exact reads and already-issued search continuation. Removing a revision withdraws new access after existing leases drain. The service neither expires revisions on a timer nor runs Git GC. Operators must keep every retained Git object reachable/protected from collection; selection alone is not a Git ref. There is no automatic fallback to active when an exact revision disappears.
+Publishing an owner absent from the new map is not an existing-owner no-op.
+Explicitly name its complete intended group and supply the exact approved
+content/provenance. If an unchanged HEAD does not record this operation, the
+writer creates a forward publication-intent commit with the same tree rather
+than adopting a foreign candidate as recovery. This can advance document Git
+without changing Markdown or fabricating source identities. An exact matching
+pending first-publication operation reuses its candidate; existing-owner recovery
+still requires its original complete input identity. Other owners' pointers and
+the separately preserved old selection do not change.
 
 ## MCP client contract
 
@@ -212,17 +295,48 @@ The endpoint is stateless WebMVC MCP with exactly two read-only tools. Every `/m
 
 ### search_documents
 
-Arguments: required `query`, optional `limit` (default10), optional `cursor`. Queries are nonblank literal, case-sensitive substrings: no regex, stemming, normalization, fuzzy matching or relevance ranking. A first call searches only the active document revision. Do not send a source SHA, document revision selector, branch or unknown field.
+Arguments: required `query`; optional `limit` (default 10), `cursor`, and
+`repositoryId`. Omitted `repositoryId` means global search; a valid owner with
+no selected documents returns a successful empty search. Blank/invalid owners
+are `INVALID_ARGUMENT`. Queries are nonblank literal, case-sensitive
+substrings: no regex, stemming, normalization, fuzzy matching or relevance
+ranking. Do not send a source SHA, document revision selector, branch or unknown
+field.
 
-ATX headings outside backtick/tilde fenced blocks define sections; a headingless prefix starts at original line1 with an empty title. Each section contributes at most its first match; ancestors do not duplicate child matches. Results are ordered by Java `String.compareTo` path, then original section start line. Headings/snippets are bounded Unicode-code-point excerpts, with explicit truncation flags. A snippet is navigation, not a complete section or evidence of a business claim.
+ATX headings outside backtick/tilde fenced blocks define sections; a headingless
+prefix starts at original line 1 with an empty title. Each section contributes
+at most its first match; ancestors do not duplicate child matches. Global
+results are ordered by Java `String.compareTo` full path, then original section
+start line. Headings/snippets are bounded Unicode-code-point excerpts with
+explicit truncation flags. A snippet is navigation, not a complete section or
+business evidence.
 
-The envelope returns `documentContext`, `collectionPurpose`, `trust`, `publicationStatus`, optional `publicationErrorCode`, `items`, and `page {returned,hasMore,nextCursor?}`. Each hit carries exact context/path/digest, `section {startLine,title,titleTruncated}`, snippet/flag, independent primary/related source contexts and actual review metadata.
+The envelope contains `documentRepositoryId`, optional selected `repositoryId`,
+`collectionPurpose`, `trust`, `publicationStatus`, optional
+`publicationErrorCode`, `items`, and `page {returned,hasMore,nextCursor?}`.
+There is no top-level `documentContext`: each hit has its own
+`documentContext {documentRepositoryId,repositoryId,documentRevision}`, exact
+path/digest, section locator, snippet, independent primary/related source
+contexts and review metadata. Optional fields follow the NON_ABSENT convention.
 
-Continue with the **same query and requested limit** plus the returned cursor. Continuation pins the initial document revision even after active changes. The cursor is process-authenticated, not a durable bookmark; tampering, changed query/limit or restart returns `INVALID_ARGUMENT`. A withdrawn pinned revision returns `DOCUMENT_REVISION_NOT_AVAILABLE`. Do not rewrite or decode the token to choose another revision. Whole trailing hits may be removed for the response budget; the continuation points to the first omitted hit and retains the original requested limit.
+Continue with the same query, requested limit and owner scope plus the returned
+cursor. A scoped cursor binds only that owner's effective full document SHA; a
+global cursor binds the canonical active owner map. Any effective owner addition,
+update or removal expires a global cursor; a scoped cursor expires only when its
+owner changes. An identical owner no-op does not expire either scope. Cursor
+scope/query/limit are authenticated; tampering, changed bindings or process
+restart return `INVALID_ARGUMENT`, while a changed effective scope returns
+`DOCUMENT_REVISION_NOT_AVAILABLE`. Do not rewrite the token or context. Whole
+trailing hits may be trimmed for response budget; continuation points to the
+first omitted hit and retains the original requested limit.
 
 ### read_document
 
-Arguments: exact `documentContext {documentRepositoryId,documentRevision}`, `path`, and `sectionStartLine` copied from a hit. Every locator is required; it must identify a catalog member and actual section boundary. No nearest-section guess or current fallback is made.
+Arguments: complete `documentContext {documentRepositoryId,repositoryId,documentRevision}`,
+`path`, and `sectionStartLine` copied from a hit. The context must identify the
+central document repository and exact effective commit for that path's owner.
+Every locator is required; the path must be owned by the context and the line
+must be an actual section boundary. No nearest-section guess or current fallback.
 
 The result is the **entire bounded Markdown document**, not just the matching section: `scope: FULL_DOCUMENT`, `startLine:1`, original `endLine`, lossless `content`, `blobId`, `contentDigest`, `byteLength`, selected section, and the same version/source/review/publication metadata. CRLF and EOF are preserved. There is no read pagination, summary, elision or duplicate separate section body. Read the full body, including headers, contexts, evidence rows and limitations, before using a navigation claim.
 
@@ -234,13 +348,13 @@ Application errors return `isError:true` with `{code,message}` in matching text/
 
 | Bound | Maximum |
 | --- | --- |
-| Publication selection | 16KiB |
-| Retained revisions | 8 |
-| Catalog JSON per revision | 256KiB |
-| Documents per revision | 128 |
-| Raw Markdown per document | 64KiB |
-| Total retained Markdown | 16MiB |
-| Sections per document / total retained | 256 / 8192 |
+| Publication selection | 16 KiB |
+| Selected business-repository owners | 128 |
+| Catalog JSON per selected Git commit | 256 KiB |
+| Selected documents across all owners | 128 |
+| Raw Markdown per document | 64 KiB |
+| Selected Markdown across all owners | 16 MiB |
+| Sections per document / across all selected owners | 256 / 8192 |
 | UTF-8 path bytes | 512 |
 | Related source contexts per document | 32 |
 | Heading / snippet Unicode code points | 160 / 240 |
@@ -261,7 +375,16 @@ An oversized candidate's full contextual read is an admission-capacity refusal: 
 
 ## Verification and evidence
 
-Use `bash scripts/test-document-mcp.sh` for both packaged native journeys after resource admission. They snapshot the executable into an exclusively owned temporary root, exercise real CLI/HTTP/MCP and exact Git blobs, including update, old-pin continuation, rollback and explicit withdrawal, reap owned child processes, remove private test storage/logs and retain sanitized acceptance. They do not authorize images, existing-service restarts or project commits.
-Interrupted teardown still completes graceful/forced termination and restores owner interruption only after reaping. A running-ownership marker is cleared only after actual child exit; if termination remains unconfirmed, the launcher retains the private work root instead of deleting underneath a possibly live process.
+Latest-document-navigation ordinary checks and packaged native journeys passed; see the testing guide for counts and platform limits.
+Root-owned verification must cover owner-isolated reads, mixed-owner global
+pages/cursors, scoped versus global expiry, no-op and rejected candidates,
+named/last-file removal, empty selection, inspected same-operation recovery,
+restart behavior and unchanged Source pins. Current execution results and
+pending gates are recorded separately in the testing guide.
 
-External acceptance explicitly selects `gpt-6-luna`, gives the agent only Document MCP and Source Query MCP, and records the client/version/invocation, complete tool trace and source-grounded answer. Scenarios cover current and historical source contexts, thin/no-hit document guidance and document replacement. Do not preload document bodies or author traces, rewrite the agent answer, or substitute local reads/preparation calls for MCP evidence. Native and agent results are separate evidence in [current verification status](testing.md#current-verification-status) and the [agent checklist](mcp-agent-acceptance.md). Local evidence does not establish image/CI, deployment UID isolation or production capacity acceptance.
+Fresh external-agent scenarios have also executed, with recovery cases recorded
+separately from clean passes. Future runs must still select `gpt-6-luna` explicitly,
+use only Document MCP and Source Query MCP read access, and preserve the complete
+tool trace and source-grounded answer.
+Native and agent evidence remain separate; historical baseline evidence and
+prior failed answers are documented in [testing](testing.md#current-verification-status).

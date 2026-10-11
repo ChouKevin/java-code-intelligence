@@ -46,7 +46,7 @@ class DocumentMcpTimeoutTest {
                 HttpClient client = HttpClient.newHttpClient();
                 ExecutorService reloadExecutor = Executors.newSingleThreadExecutor()) {
             String first = fixture.commit(Map.of(DocumentFixture.GUIDE, "# Old\nold evidence\n"));
-            fixture.publish(first, first);
+            fixture.publish(Map.of("sample", first));
             ConfigurableApplicationContext application = new SpringApplicationBuilder(DocumentQueryApplication.class,
                     DelayedMaterialization.class).initializers(context -> context.getBeanFactory().registerSingleton("delay", delay))
                     .run("--server.port=0", "--document.repository-id=" + DocumentFixture.DOCUMENT_REPOSITORY,
@@ -56,7 +56,7 @@ class DocumentMcpTimeoutTest {
             try {
                 int port = ((WebServerApplicationContext) application).getWebServer().getPort();
                 URI endpoint = URI.create("http://127.0.0.1:" + port + "/mcp");
-                ReadRequest oldRead = new ReadRequest(new DocumentContext(DocumentFixture.DOCUMENT_REPOSITORY, first),
+                ReadRequest oldRead = new ReadRequest(new DocumentContext(DocumentFixture.DOCUMENT_REPOSITORY, "sample", first),
                         DocumentFixture.GUIDE, 1);
                 Map<String, Object> readArguments = Map.of("documentContext", oldRead.documentContext(),
                         "path", DocumentFixture.GUIDE, "sectionStartLine", 1);
@@ -75,7 +75,7 @@ class DocumentMcpTimeoutTest {
                         failure -> assertThat(failure.code()).isEqualTo(DocumentFailure.Code.DOCUMENT_BUSY));
 
                 String second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# New\nnew evidence\n"));
-                fixture.publish(second, second);
+                fixture.publish(Map.of("sample", second));
                 DocumentCatalog catalog = application.getBean(DocumentCatalog.class);
                 CountDownLatch reloadStarted = new CountDownLatch(1);
                 AtomicReference<Thread> reloadThread = new AtomicReference<>();
@@ -83,7 +83,7 @@ class DocumentMcpTimeoutTest {
                     reloadThread.set(Thread.currentThread());
                     reloadStarted.countDown();
                     try (DocumentCatalog.ReadLease lease = catalog.open(DocumentDeadline.after(Duration.ofSeconds(5)))) {
-                        return lease.view().activeRevision();
+                        return lease.view().repositories().get("sample").context().documentRevision();
                     }
                 });
                 assertThat(reloadStarted.await(2, TimeUnit.SECONDS)).isTrue();
@@ -99,7 +99,7 @@ class DocumentMcpTimeoutTest {
                 }
                 JsonNode recovered = awaitRecovery(client, endpoint, fixture);
                 assertThat(recovered.path("isError").asBoolean()).isFalse();
-                assertThat(recovered.path("structuredContent").path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
+                assertThat(recovered.path("structuredContent").path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
                 assertThat(recovered.path("structuredContent").path("items").get(0).path("snippet").stringValue()).contains("new evidence");
             } finally {
                 delay.release.countDown();

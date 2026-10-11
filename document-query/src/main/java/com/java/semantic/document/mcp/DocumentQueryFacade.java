@@ -37,19 +37,20 @@ public final class DocumentQueryFacade {
         try {
             if (Objects.isNull(arguments)) { throw invalid(); }
             if ("search_documents".equals(tool)) {
-                fields(arguments, Set.of("query", "limit", "cursor"), Set.of("query"));
+                fields(arguments, Set.of("query", "limit", "cursor", "repositoryId"), Set.of("query"));
                 String query = text(arguments.get("query"));
                 int limit = arguments.containsKey("limit") ? integer(arguments.get("limit")) : DocumentContract.DEFAULT_LIMIT;
                 Optional<String> cursor = arguments.containsKey("cursor") ? Optional.of(text(arguments.get("cursor"))) : Optional.empty();
-                return service.search(new SearchRequest(query, limit, cursor), materializer::apply);
+                Optional<String> repositoryId = arguments.containsKey("repositoryId") ? Optional.of(text(arguments.get("repositoryId"))) : Optional.empty();
+                return service.search(new SearchRequest(query, limit, cursor, repositoryId), materializer::apply);
             }
             if ("read_document".equals(tool)) {
                 fields(arguments, Set.of("documentContext", "path", "sectionStartLine"), Set.of("documentContext", "path", "sectionStartLine"));
                 if (!(arguments.get("documentContext") instanceof Map<?, ?> context)) { throw invalid(); }
-                fields(context, Set.of("documentRepositoryId", "documentRevision"), Set.of("documentRepositoryId", "documentRevision"));
+                fields(context, Set.of("documentRepositoryId", "repositoryId", "documentRevision"), Set.of("documentRepositoryId", "repositoryId", "documentRevision"));
                 String repositoryId = text(context.get("documentRepositoryId"));
                 String revision = text(context.get("documentRevision"));
-                DocumentContext identity = new DocumentContext(repositoryId, revision);
+                DocumentContext identity = new DocumentContext(repositoryId, text(context.get("repositoryId")), revision);
                 if (!repositoryId.equals(identity.documentRepositoryId()) || !revision.equals(identity.documentRevision())) { throw invalid(); }
                 return service.read(new ReadRequest(identity, text(arguments.get("path")), integer(arguments.get("sectionStartLine"))), materializer::apply);
             }

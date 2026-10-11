@@ -12,9 +12,10 @@ import com.java.semantic.document.application.DocumentContract.Trust;
 import com.java.semantic.document.catalog.DocumentCatalog;
 import com.java.semantic.document.catalog.DocumentCatalog.CatalogView;
 import com.java.semantic.document.catalog.DocumentCatalog.ReadLease;
-import com.java.semantic.document.catalog.DocumentCatalog.RevisionSnapshot;
+import com.java.semantic.document.catalog.DocumentCatalog.RepositorySnapshot;
 import com.java.semantic.document.catalog.DocumentCatalog.Document;
 import com.java.semantic.document.catalog.MarkdownSections.Span;
+import com.java.semantic.model.repository.RepositoryId;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,19 +47,25 @@ public final class DocumentQueryService {
             DocumentCursorCodec.Cursor continuation = request.cursor().isPresent()
                     ? cursors.decode(request.cursor().orElseThrow()) : null;
             if (Objects.nonNull(continuation)
-                    && (!continuation.query().equals(request.query()) || continuation.limit() != request.limit())) {
+                    && (!continuation.query().equals(request.query()) || continuation.limit() != request.limit()
+                            || !continuation.repositoryId().equals(request.repositoryId()))) {
                 throw invalid();
             }
 
             try (ReadLease lease = catalog.open(deadline)) {
                 deadline.check();
                 CatalogView view = lease.view();
-                String revision = Objects.isNull(continuation) ? view.activeRevision() : continuation.revision();
-                DocumentContext context = view.context(revision);
-                RevisionSnapshot snapshot = view.revisions().get(revision);
+                RepositorySnapshot scoped = request.repositoryId().map(view.repositories()::get).orElse(null);
+                String version = request.repositoryId().isEmpty() ? view.globalVersion()
+                        : Objects.isNull(scoped) ? "" : scoped.context().documentRevision();
+                if (Objects.nonNull(continuation) && !continuation.version().equals(version)) {
+                    throw new DocumentFailure(DocumentFailure.Code.DOCUMENT_REVISION_NOT_AVAILABLE);
+                }
+                Map<String, Document> documents = request.repositoryId().isEmpty() ? view.documents()
+                        : Objects.isNull(scoped) ? Map.of() : scoped.documents();
                 Position after = Objects.isNull(continuation) ? null
                         : new Position(continuation.path(), continuation.sectionStartLine());
-                List<SearchHit> candidates = collectCandidates(snapshot, request.query(), view.collectionPurpose(),
+                List<SearchHit> candidates = collectCandidates(view, documents, request.query(), view.collectionPurpose(),
                         after, request.limit(), deadline);
                 int returned = Math.min(request.limit(), candidates.size());
 
@@ -66,11 +73,11 @@ public final class DocumentQueryService {
                     deadline.check();
                     boolean hasMore = candidates.size() > returned;
                     Optional<String> nextCursor = hasMore
-                            ? Optional.of(cursors.encode(new DocumentCursorCodec.Cursor(context.documentRevision(),
+                            ? Optional.of(cursors.encode(new DocumentCursorCodec.Cursor(request.repositoryId(), version,
                                     request.query(), request.limit(), candidates.get(returned).path(),
                                     candidates.get(returned).section().startLine())))
                             : Optional.empty();
-                    SearchResult result = new SearchResult(context, view.collectionPurpose(), Trust.NOT_VERIFIED,
+                    SearchResult result = new SearchResult(view.documentRepositoryId(), request.repositoryId(), view.collectionPurpose(), Trust.NOT_VERIFIED,
                             view.publicationStatus(), view.publicationErrorCode(), candidates.subList(0, returned),
                             new Page(returned, hasMore, nextCursor));
                     try {
@@ -97,11 +104,8 @@ public final class DocumentQueryService {
             try (ReadLease lease = catalog.open(deadline)) {
                 deadline.check();
                 CatalogView view = lease.view();
-                if (!view.documentRepositoryId().equals(request.documentContext().documentRepositoryId())) {
-                    throw new DocumentFailure(DocumentFailure.Code.DOCUMENT_REPOSITORY_NOT_FOUND);
-                }
-                DocumentContext context = view.context(request.documentContext().documentRevision());
-                RevisionSnapshot snapshot = view.revisions().get(context.documentRevision());
+                RepositorySnapshot snapshot = view.requireCurrent(request.documentContext());
+                DocumentContext context = snapshot.context();
                 Document document = snapshot.documents().get(request.path());
                 if (Objects.isNull(document)) {
                     throw new DocumentFailure(DocumentFailure.Code.DOCUMENT_NOT_FOUND);
@@ -127,10 +131,10 @@ public final class DocumentQueryService {
         }
     }
 
-    private static List<SearchHit> collectCandidates(RevisionSnapshot snapshot, String query,
+    private static List<SearchHit> collectCandidates(CatalogView view, Map<String, Document> documents, String query,
             CollectionPurpose collectionPurpose, Position after, int limit, DocumentDeadline deadline) {
         List<SearchHit> hits = new ArrayList<>(limit + 1);
-        for (Map.Entry<String, Document> entry : snapshot.documents().entrySet()) {
+        for (Map.Entry<String, Document> entry : documents.entrySet()) {
             deadline.check();
             String path = entry.getKey();
             Document document = entry.getValue();
@@ -160,7 +164,7 @@ public final class DocumentQueryService {
                         ? content.offsetByCodePoints(matchOffset, DocumentContract.MAX_SNIPPET_CODE_POINTS)
                         : excerptEnd;
                 String snippet = content.substring(matchOffset, snippetEnd);
-                hits.add(new SearchHit(snapshot.context(), path, document.contentDigest(), section.section(), snippet,
+                hits.add(new SearchHit(view.repositories().get(document.primaryContext().repositoryId()).context(), path, document.contentDigest(), section.section(), snippet,
                         snippetTruncated, document.primaryContext(), document.relatedContexts(), document.reviewStatus(),
                         document.reviewReference(), collectionPurpose, Trust.NOT_VERIFIED));
                 nextSearchOffset = section.endOffset();
@@ -183,10 +187,12 @@ public final class DocumentQueryService {
 
     private static void validateSearch(SearchRequest request, Function<SearchResult, ?> materialize) {
         if (Objects.isNull(request) || Objects.isNull(materialize) || Objects.isNull(request.query())
-                || Objects.isNull(request.cursor()) || request.query().length() > DocumentContract.MAX_QUERY_CODE_POINTS * 2
+                || Objects.isNull(request.cursor()) || Objects.isNull(request.repositoryId()) || request.query().length() > DocumentContract.MAX_QUERY_CODE_POINTS * 2
                 || request.limit() < 1 || request.limit() > DocumentContract.MAX_LIMIT) {
             throw invalid();
         }
+        try { request.repositoryId().ifPresent(RepositoryId::new); }
+        catch (IllegalArgumentException exception) { throw invalid(); }
         String query = request.query();
         int queryCodePoints = query.codePointCount(0, query.length());
         if (queryCodePoints < 1 || queryCodePoints > DocumentContract.MAX_QUERY_CODE_POINTS || query.isBlank()) {

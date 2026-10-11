@@ -23,8 +23,12 @@ abstract class DocumentJourneySupport {
     private int requestId;
 
     Map<String, Object> readArguments(String revision, int startLine) {
-        return Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY, "documentRevision", revision),
-                "path", DocumentFixture.GUIDE, "sectionStartLine", startLine);
+        return readArguments("sample", revision, DocumentFixture.GUIDE, startLine);
+    }
+
+    Map<String, Object> readArguments(String owner, String revision, String path, int startLine) {
+        return Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
+                "repositoryId", owner, "documentRevision", revision), "path", path, "sectionStartLine", startLine);
     }
 
     void initialize(HttpClient client, URI uri, String token) throws Exception {

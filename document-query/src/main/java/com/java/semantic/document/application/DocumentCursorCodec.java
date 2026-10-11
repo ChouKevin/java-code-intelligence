@@ -1,12 +1,15 @@
 package com.java.semantic.document.application;
 
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.regex.Pattern;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import tools.jackson.core.JacksonException;
@@ -17,9 +20,10 @@ public final class DocumentCursorCodec {
     private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
+    private static final Pattern GLOBAL_VERSION = Pattern.compile("[0-9a-f]{64}");
 
-    record Cursor(String revision, String query, int limit, String path, int sectionStartLine) { }
-    private record Payload(String revision, String query, int limit, String path, int sectionStartLine) { }
+    record Cursor(Optional<String> repositoryId, String version, String query, int limit, String path, int sectionStartLine) { }
+    private record Payload(Optional<String> repositoryId, String version, String query, int limit, String path, int sectionStartLine) { }
 
     private final ObjectMapper mapper;
     private final byte[] key = new byte[32];
@@ -30,8 +34,8 @@ public final class DocumentCursorCodec {
     }
 
     String encode(Cursor cursor) {
-        validate(cursor.revision(), cursor.query(), cursor.limit(), cursor.path(), cursor.sectionStartLine());
-        byte[] payload = mapper.writeValueAsBytes(new Payload(cursor.revision(), cursor.query(), cursor.limit(),
+        validate(cursor.repositoryId(), cursor.version(), cursor.query(), cursor.limit(), cursor.path(), cursor.sectionStartLine());
+        byte[] payload = mapper.writeValueAsBytes(new Payload(cursor.repositoryId(), cursor.version(), cursor.query(), cursor.limit(),
                 cursor.path(), cursor.sectionStartLine()));
         String token = ENCODER.encodeToString(payload) + "." + ENCODER.encodeToString(sign(payload));
         if (token.length() > DocumentContract.MAX_CURSOR_BYTES) {
@@ -73,16 +77,18 @@ public final class DocumentCursorCodec {
         if (Objects.isNull(decoded)) {
             throw invalid();
         }
-        validate(decoded.revision(), decoded.query(), decoded.limit(), decoded.path(), decoded.sectionStartLine());
-        return new Cursor(decoded.revision(), decoded.query(), decoded.limit(), decoded.path(), decoded.sectionStartLine());
+        validate(decoded.repositoryId(), decoded.version(), decoded.query(), decoded.limit(), decoded.path(), decoded.sectionStartLine());
+        return new Cursor(decoded.repositoryId(), decoded.version(), decoded.query(), decoded.limit(), decoded.path(), decoded.sectionStartLine());
     }
 
-    private static void validate(String revision, String query, int limit, String path, int sectionStartLine) {
+    private static void validate(Optional<String> repositoryId, String version, String query, int limit, String path, int sectionStartLine) {
         try {
-            RepositoryRevision.ofSha(revision);
-        } catch (IllegalArgumentException | NullPointerException exception) {
-            throw invalid();
-        }
+            Objects.requireNonNull(repositoryId);
+            if (repositoryId.isPresent()) {
+                new RepositoryId(repositoryId.orElseThrow());
+                RepositoryRevision.ofSha(version);
+            } else if (Objects.isNull(version) || !GLOBAL_VERSION.matcher(version).matches()) { throw invalid(); }
+        } catch (IllegalArgumentException | NullPointerException exception) { throw invalid(); }
         if (Objects.isNull(query) || query.isBlank()
                 || query.codePointCount(0, query.length()) > DocumentContract.MAX_QUERY_CODE_POINTS
                 || limit < 1 || limit > DocumentContract.MAX_LIMIT

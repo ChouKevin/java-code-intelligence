@@ -50,8 +50,8 @@ For authorized registration, default-source refresh, exact historical preparatio
 or optional Java analysis, load
 [manage-repository](../../skills/manage-repository/SKILL.md). These are separate
 operations, not an automatic pipeline; the skill grants no service mutation.
-Local document update/activation uses its independent local Git route, not source
-prepare, business-repo commits or remote/push prerequisites.
+Local document `update`/named `remove`/`status` uses its independent central
+local-Git route, not source prepare, business-repo commits or remote/push prerequisites.
 
 For onboarding, use separate external configuration files (paths are examples,
 not loaded automatically). A synthetic registration on Indexer:
@@ -571,13 +571,26 @@ is external to this source-publication mechanism. An author directly reads appro
 exact local Git source, stages private drafts, and hands exact reviewed content
 or explicitly authorized TEST_ONLY drafts to a separately authorized local Git
 document repository. No business-repo commit/prepare or navigation-hint setting
-change is required. The [local document command](document-mcp.md#local-git-document-commands)
-generates the catalog, commits named Markdown and activates the selection;
-independent read-only Document MCP serves its admitted active/retained revisions.
-Document commits are distinct from business-source SHAs and never select source
-current. Local activation is not proof of running-service adoption; check actual
-Document MCP identities and publication status. Failed or pending refresh does not
-authorize replacing the last approved content. Elasticsearch is not provided.
+change is required.
+
+The local document command generates the format-1 catalog, commits named
+Markdown, and atomically publishes a format-2 per-owner selection map.
+`update`, named `remove`, and `status` operate on that central local Git repo;
+the independent read-only Document MCP serves each owner's selected latest
+document group. `search_documents` accepts `query`, optional `limit`, `cursor`,
+and optional `repositoryId`; global hits may use different document commits,
+and each hit carries `{documentRepositoryId,repositoryId,documentRevision}`.
+An A update leaves unchanged B document reads and B-scoped continuations valid;
+global cursors expire on effective owner-map change.
+
+Source history is independent and unchanged: a source request for a historical
+SHA remains at that exact pin and does not seek a historical document version.
+If source advances or rolls back, revise affected named documents against the
+resulting source SHA and publish a forward document commit when authorized.
+Source/document lag is allowed; no automatic synchronization occurs. Missing
+documents do not unregister or delete Source and instead lead to Source Query
+discovery. Document commits never select or change Source current.
+Elasticsearch is not provided.
 
 
 ## Prepare and navigate the Java index

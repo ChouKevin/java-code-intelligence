@@ -8,6 +8,9 @@ import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.application.DocumentFailure.Code;
 import com.java.semantic.document.mcp.DocumentResultWriter;
 import com.java.semantic.document.support.DocumentFixture;
+import com.java.semantic.model.source.SourceContext;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -36,8 +39,12 @@ class DocumentCatalogLifecycleTest {
     @Test
     void successfulUpdatesWaitForOldLeasesAndThirdPublicationCannotConstructBehindSecondLease() throws Exception {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
-            String first = fixture.commit(Map.of(DocumentFixture.GUIDE, "# A\nfirst"));
-            fixture.publish(first, first);
+            byte[] a = "# A\nfirst".getBytes(StandardCharsets.UTF_8);
+            byte[] b = "# B\nunchanged".getBytes(StandardCharsets.UTF_8);
+            String bPath = "repositories/b/guide.md";
+            String first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, a, bPath, b),
+                    List.of(fixture.row(DocumentFixture.GUIDE, a), fixture.row(bPath, b, new SourceContext("b", DocumentFixture.SOURCE_REVISION))));
+            fixture.publish(Map.of("sample", first, "b", first));
             try (GitDocumentLoader loader = spy(new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), new DocumentResultWriter(fixture.mapper)));
                     ExecutorService executor = Executors.newFixedThreadPool(2)) {
                 DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
@@ -51,29 +58,33 @@ class DocumentCatalogLifecycleTest {
                 doAnswer(invocation -> {
                     thirdConstructed.countDown();
                     return invocation.callRealMethod();
-                }).when(loader).load(eq(third), any(DocumentDeadline.class), anyLong(), anyInt());
+                }).when(loader).load(eq(third), any(), any(DocumentDeadline.class), anyInt(), anyLong(), anyInt());
                 Future<String> secondRead;
                 try (DocumentCatalog.ReadLease old = catalog.open(deadline())) {
-                    fixture.publish(second, first, second);
+                    fixture.publish(Map.of("sample", second, "b", first));
                     secondRead = executor.submit(() -> {
                         secondRequested.countDown();
                         try (DocumentCatalog.ReadLease lease = catalog.open(deadline())) {
                             secondLeased.countDown();
                             assertThat(releaseSecond.await(3, TimeUnit.SECONDS)).isTrue();
-                            return lease.view().activeRevision() + ":" + lease.view().revisions().get(second).documents().get(DocumentFixture.GUIDE).content();
+                            assertThat(lease.view().repositories().get("b").context().documentRevision()).isEqualTo(first);
+                            assertThat(lease.view().repositories().get("b").documents().get(bPath).content()).isEqualTo("# B\nunchanged");
+                            return lease.view().repositories().get("sample").context().documentRevision() + ":" + lease.view().repositories().get("sample").documents().get(DocumentFixture.GUIDE).content();
                         }
                     });
                     assertThat(secondRequested.await(2, TimeUnit.SECONDS)).isTrue();
-                    assertThat(old.view().activeRevision()).isEqualTo(first);
-                    assertThat(old.view().revisions().get(first).documents().get(DocumentFixture.GUIDE).content()).isEqualTo("# A\nfirst");
+                    assertThat(old.view().repositories().get("sample").context().documentRevision()).isEqualTo(first);
+                    assertThat(old.view().repositories().get("sample").documents().get(DocumentFixture.GUIDE).content()).isEqualTo("# A\nfirst");
+                    assertThat(old.view().repositories().get("b").documents().get(bPath).content()).isEqualTo("# B\nunchanged");
                     assertThat(secondLeased.getCount()).isEqualTo(1);
                 }
                 assertThat(secondLeased.await(2, TimeUnit.SECONDS)).isTrue();
-                fixture.publish(third, first, second, third);
+                fixture.publish(Map.of("sample", third, "b", first));
                 Future<String> thirdRead = executor.submit(() -> {
                     thirdRequested.countDown();
                     try (DocumentCatalog.ReadLease lease = catalog.open(deadline())) {
-                        return lease.view().activeRevision() + ":" + lease.view().revisions().get(third).documents().get(DocumentFixture.GUIDE).content();
+                        assertThat(lease.view().repositories().get("b").context().documentRevision()).isEqualTo(first);
+                        return lease.view().repositories().get("sample").context().documentRevision() + ":" + lease.view().repositories().get("sample").documents().get(DocumentFixture.GUIDE).content();
                     }
                 });
                 try {
@@ -90,8 +101,12 @@ class DocumentCatalogLifecycleTest {
     @Test
     void expiryDuringSectionValidationCannotActivateAndInvalidRestartCannotRecoverOnlyFromMemory() throws Exception {
         try (DocumentFixture fixture = new DocumentFixture(root.resolve("repo"))) {
-            String first = fixture.commit(Map.of(DocumentFixture.GUIDE, "# A\nfirst"));
-            fixture.publish(first, first);
+            byte[] a = "# A\nfirst".getBytes(StandardCharsets.UTF_8);
+            byte[] b = "# B\nunchanged".getBytes(StandardCharsets.UTF_8);
+            String bPath = "repositories/b/guide.md";
+            String first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, a, bPath, b),
+                    List.of(fixture.row(DocumentFixture.GUIDE, a), fixture.row(bPath, b, new SourceContext("b", DocumentFixture.SOURCE_REVISION))));
+            fixture.publish(Map.of("sample", first, "b", first));
             DocumentResultWriter writer = spy(new DocumentResultWriter(fixture.mapper));
             try (GitDocumentLoader loader = new GitDocumentLoader(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), writer)) {
                 DocumentCatalog catalog = new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader);
@@ -102,14 +117,17 @@ class DocumentCatalogLifecycleTest {
                     clock.expire();
                     return result;
                 }).when(writer).sectionWireBytes(argThat(section -> section.startLine() == 2));
-                fixture.publish(second, first, second);
+                fixture.publish(Map.of("sample", second, "b", first));
                 assertThatThrownBy(() -> catalog.open(clock.deadline())).isInstanceOfSatisfying(DocumentFailure.class,
                         failure -> assertThat(failure.code()).isEqualTo(Code.DOCUMENT_TIMEOUT));
                 Files.writeString(fixture.publication, "{broken");
                 try (DocumentCatalog.ReadLease lease = catalog.open(deadline())) {
-                    assertThat(lease.view().activeRevision()).isEqualTo(first);
+                    assertThat(lease.view().repositories().get("sample").context().documentRevision()).isEqualTo(first);
                     assertThat(lease.view().publicationStatus()).isEqualTo(PublicationStatus.UPDATE_REJECTED);
-                    assertThat(lease.view().revisions().get(first).documents().get(DocumentFixture.GUIDE).content()).isEqualTo("# A\nfirst");
+                    assertThat(lease.view().repositories().get("sample").documents().get(DocumentFixture.GUIDE).content()).isEqualTo("# A\nfirst");
+                    assertThat(lease.view().repositories()).containsOnlyKeys("sample", "b");
+                    assertThat(lease.view().repositories().get("b").context().documentRevision()).isEqualTo(first);
+                    assertThat(lease.view().repositories().get("b").documents().get(bPath).content()).isEqualTo("# B\nunchanged");
                 }
                 assertThatThrownBy(() -> new DocumentCatalog(fixture.properties(CollectionPurpose.TEST_ONLY).storage(), loader))
                         .isInstanceOfSatisfying(DocumentFailure.class,

@@ -28,7 +28,7 @@ Keep actual registrations, allowlists, credentials and MCP client settings outsi
 
 | Request | Skill |
 | --- | --- |
-| Register a repository, refresh source, prepare an exact SHA, enable indexing, update/activate local documents | [manage-repository](skills/manage-repository/SKILL.md) |
+| Register a repository, refresh source, prepare an exact SHA, enable indexing, update/remove/status local documents | [manage-repository](skills/manage-repository/SKILL.md) |
 | Draft/update repository descriptions or module/relationship guides | [describe-repository](skills/describe-repository/SKILL.md) |
 | Explain business rules, calculations, eligibility or service flows from source | [query-business-code](skills/query-business-code/SKILL.md) |
 
@@ -52,11 +52,15 @@ Clients must load [AGENTS.md](AGENTS.md) or explicitly read the relevant skill. 
 
 An external author agent reads approved exact source and produces a `DRAFT` / `NOT_VERIFIED` description or guide. Real drafts default to `.local/repository-descriptions/`; use the [canonical handoff and template](docs/operations/repository-context-prompt.md).
 
-The central document repository is **local Git, with no remote**. The [offline document command](docs/operations/document-mcp.md#local-git-document-commands) updates explicitly named Markdown, generates catalog/digests, creates a local commit and atomically selects the readable version. Users do not hand-edit catalog JSON. It preserves unrelated working edits, refuses pre-existing staged changes, and supports status, explicit activation/rollback and withdrawal. It does not modify or prepare business repositories.
+The central document repository is **one local Git repository, with no remote**. Each business repository publishes its named description/guide group independently; the format-2 selection maps each owner to one exact document commit. Use the [offline document command](docs/operations/document-mcp.md#local-git-document-commands) for `update`, named `remove` (including the final file), and `status`. It generates the format-1 catalog and atomically publishes the owner map; do not hand-edit catalog or selection JSON. Removal changes document discoverability, not Source registration or prepared versions. Git history remains available outside MCP.
 
-Formal `APPROVED` collections require review of the exact content/source identities and separate activation authority. Explicitly authorized test fixtures may remain `TEST_ONLY` / `DRAFT`; this is not production approval. `serviceVerified:false` means local success still needs verification through the running MCP.
+Formal `APPROVED` updates require exact-content/source-identity human review; named removals require explicit removal approval. Explicitly authorized test fixtures remain `TEST_ONLY` / `DRAFT`, not production approval. Results include `serviceVerified:false`; local success is not proof that a running MCP adopted the map.
 
-Document search uses active; retained exact reads and continuations stay pinned. Document commits and source SHAs are independent. Read the full document behind a hit, then verify conclusions against the requested source version. Missing or stale navigation does not exclude repositories or permit switching source revisions.
+`search_documents` searches all owners by default and accepts an optional `repositoryId` filter. Its result envelope identifies the central document repository and optional filter; each hit carries its own `{documentRepositoryId,repositoryId,documentRevision}` context, so a global page may contain different document commits. `read_document` requires that complete context, the exact path, and `sectionStartLine`. Updating A invalidates A's former document context, not unchanged B reads or B-scoped cursors; any effective owner-map change expires a global cursor, while a scoped cursor expires only when its owner changes. Source Query history and source pins are independent and unchanged.
+
+On source change or rollback, revise the named current documents against the resulting source SHA and publish a forward document commit. Source/document lag is allowed; an analyzed source SHA is provenance, not a synchronization promise. Missing or stale documents trigger source discovery, not source deletion or evidence of absence.
+
+An existing deployment using the old selection/context shape is not migrated in place. A separately authorized cutover uses a fresh selection path populated by explicit per-owner updates; legacy selections and ownerless document contexts are rejected. Central Git history is not MCP historical membership.
 
 The optional short `navigation-hint` and repo-local `project-guide-path` remain separate discovery mechanisms. They are not prerequisites for central documents. Elasticsearch, vector search, scheduled document regeneration and automatic cross-repository graphs are not implemented.
 

@@ -2,6 +2,7 @@ package com.java.semantic.document.support;
 
 import com.java.semantic.document.application.DocumentContract.CollectionPurpose;
 import com.java.semantic.document.config.DocumentQueryProperties;
+import com.java.semantic.model.source.SourceContext;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,10 +34,14 @@ public final class DocumentFixture implements AutoCloseable {
     }
 
     public Map<String, Object> row(String path, byte[] bytes) throws Exception {
+        return row(path, bytes, new SourceContext("sample", SOURCE_REVISION));
+    }
+
+    public Map<String, Object> row(String path, byte[] bytes, SourceContext primary) throws Exception {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("path", path);
         row.put("contentDigest", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)));
-        row.put("primaryContext", Map.of("repositoryId", "sample", "revision", SOURCE_REVISION));
+        row.put("primaryContext", primary);
         row.put("relatedContexts", List.of());
         row.put("reviewStatus", "DRAFT");
         return row;
@@ -68,11 +73,13 @@ public final class DocumentFixture implements AutoCloseable {
                 .setCommitter("Fixture", "fixture@example.test").setAllowEmpty(true).call().name();
     }
 
-    public void publish(String active, String... retained) throws Exception {
+    public void publish(Map<String, String> revisionsByRepository) throws Exception {
         Path temporary = publication.resolveSibling("publication.next");
-        Files.write(temporary, mapper.writeValueAsBytes(Map.of("formatVersion", 1,
-                "documentRepositoryId", DOCUMENT_REPOSITORY, "activeRevision", active,
-                "retainedRevisions", List.of(retained))));
+        List<Map<String, String>> repositories = new ArrayList<>();
+        new java.util.TreeMap<>(revisionsByRepository).forEach((owner, revision) ->
+                repositories.add(Map.of("repositoryId", owner, "documentRevision", revision)));
+        Files.write(temporary, mapper.writeValueAsBytes(Map.of("formatVersion", 2,
+                "documentRepositoryId", DOCUMENT_REPOSITORY, "repositories", repositories)));
         Files.move(temporary, publication, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 

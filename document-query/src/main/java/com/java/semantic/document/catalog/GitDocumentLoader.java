@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -72,15 +73,13 @@ public final class GitDocumentLoader implements AutoCloseable {
         }
     }
 
-    public DocumentCatalog.RevisionSnapshot load(String revision, DocumentDeadline deadline) {
-        return load(revision, deadline, DocumentContract.MAX_TOTAL_BYTES, DocumentContract.MAX_TOTAL_SECTIONS);
-    }
-
-    DocumentCatalog.RevisionSnapshot load(String revision, DocumentDeadline deadline, long maximumBytes, int maximumSections) {
+    public Map<String, DocumentCatalog.RepositorySnapshot> load(String revision, Set<String> repositoryIds,
+            DocumentDeadline deadline, int maximumDocuments, long maximumBytes, int maximumSections) {
         deadline.check();
-        DocumentContext context;
-        try { context = new DocumentContext(properties.repositoryId(), revision); }
-        catch (IllegalArgumentException exception) { throw invalid(); }
+        if (repositoryIds.isEmpty()) { throw invalid(); }
+        try {
+            for (String owner : repositoryIds) { new DocumentContext(properties.repositoryId(), owner, revision); }
+        } catch (IllegalArgumentException exception) { throw invalid(); }
         try (RevWalk walk = new RevWalk(repository)) {
             RevCommit commit = walk.parseCommit(ObjectId.fromString(revision));
             if (!commit.name().equals(revision)) { throw invalid(); }
@@ -89,8 +88,16 @@ public final class GitDocumentLoader implements AutoCloseable {
             if (!text(catalog, "documentRepositoryId").equals(properties.repositoryId())) { throw invalid(); }
             JsonNode rows = catalog.path("documents");
             if (!rows.isArray()) { throw invalid(); }
-            if (rows.size() > DocumentContract.MAX_DOCUMENTS) { throw capacity(); }
-            TreeMap<String, DocumentCatalog.Document> documents = new TreeMap<>();
+            Set<String> paths = new HashSet<>();
+            TreeMap<String, TreeMap<String, DocumentCatalog.Document>> documents = new TreeMap<>();
+            for (String owner : repositoryIds) { documents.put(owner, new TreeMap<>()); }
+            int documentCount = 0;
+            int selectedCount = 0;
+            for (JsonNode row : rows) {
+                deadline.check();
+                if (repositoryIds.contains(sourceContext(row.path("primaryContext")).repositoryId())) { selectedCount++; }
+            }
+            if (selectedCount > maximumDocuments) { throw capacity(); }
             long bytes = 0;
             int sections = 0;
             for (JsonNode row : rows) {
@@ -99,7 +106,7 @@ public final class GitDocumentLoader implements AutoCloseable {
                 SourceContext primary = sourceContext(row.path("primaryContext"));
                 String path = text(row, "path");
                 validatePath(path, primary.repositoryId());
-                if (documents.containsKey(path)) { throw invalid(); }
+                if (!paths.add(path)) { throw invalid(); }
                 String digest = text(row, "contentDigest");
                 if (!DIGEST.matcher(digest).matches()) { throw invalid(); }
                 List<SourceContext> related = relatedContexts(row.path("relatedContexts"), primary.repositoryId());
@@ -108,6 +115,9 @@ public final class GitDocumentLoader implements AutoCloseable {
                 catch (IllegalArgumentException exception) { throw invalid(); }
                 Optional<String> reference = row.has("reviewReference") ? Optional.of(text(row, "reviewReference")) : Optional.empty();
                 if (status == ReviewStatus.APPROVED && (reference.isEmpty() || reference.orElseThrow().isBlank())) { throw invalid(); }
+                if (!repositoryIds.contains(primary.repositoryId())) { continue; }
+                if (++documentCount > maximumDocuments) { throw capacity(); }
+                DocumentContext context = new DocumentContext(properties.repositoryId(), primary.repositoryId(), revision);
                 if (properties.collectionPurpose() == CollectionPurpose.APPROVED && status != ReviewStatus.APPROVED) { throw invalid(); }
                 DocumentCatalog.Document document;
                 try (TreeWalk tree = TreeWalk.forPath(repository, path, commit.getTree())) {
@@ -136,12 +146,25 @@ public final class GitDocumentLoader implements AutoCloseable {
                 writer.success(document.readResult(context, largest, properties.collectionPurpose(),
                         PublicationStatus.UPDATE_REJECTED, Optional.of(Code.DOCUMENT_CAPACITY_EXCEEDED)));
                 deadline.check();
-                documents.put(path, document);
+                documents.get(primary.repositoryId()).put(path, document);
                 bytes += document.byteLength();
                 sections += document.sections().size();
             }
             deadline.check();
-            return new DocumentCatalog.RevisionSnapshot(context, documents, bytes, sections);
+            TreeMap<String, DocumentCatalog.RepositorySnapshot> snapshots = new TreeMap<>();
+            for (Map.Entry<String, TreeMap<String, DocumentCatalog.Document>> entry : documents.entrySet()) {
+                if (entry.getValue().isEmpty()) { throw invalid(); }
+                long ownerBytes = 0;
+                int ownerSections = 0;
+                for (DocumentCatalog.Document document : entry.getValue().values()) {
+                    ownerBytes += document.byteLength();
+                    ownerSections += document.sections().size();
+                }
+                snapshots.put(entry.getKey(), new DocumentCatalog.RepositorySnapshot(
+                        new DocumentContext(properties.repositoryId(), entry.getKey(), revision),
+                        entry.getValue(), ownerBytes, ownerSections));
+            }
+            return snapshots;
         } catch (DocumentFailure failure) {
             throw failure;
         } catch (IOException exception) {
