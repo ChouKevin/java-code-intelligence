@@ -46,7 +46,7 @@ Use this skill only for authoring/updating descriptions or guides. Registration,
 ### 模組地圖／關係 guide（明確的文件撰寫請求）
 
 使用者明確要求撰寫／更新 module inventory 或 relationship guide，或新增 repo
-onboarding 包含此草稿交接時，依[外部 guide prompt 的固定模板](../../docs/operations/repository-context-prompt.md#module-aware-guide-mvp)
+onboarding 包含此草稿交接時，依[外部 guide prompt 的固定模板](../../docs/operations/repository-context-prompt.md#module-aware-guide-template)
 產生完整 Markdown guide，不重複第二份模板。只詢問模組或關係、要求解釋
 現有程式的 read-only 問題，改讀 query-business-code，不轉成文件撰寫。
 
@@ -63,10 +63,10 @@ onboarding 包含此草稿交接時，依[外部 guide prompt 的固定模板](.
 ## 人工審閱與發布交接
 
 - 中央文件草稿每次建立或更新都保持 `DRAFT`／`NOT_VERIFIED`。交付完整候選內容、主 repo 與跨 repo 各自的完整 analyzedRevision、已讀／未讀範圍、差異及受影響引用。正式 APPROVED collection 須人工審閱該次確切內容與版本；變更後重新審閱，不能沿用先前核准或由 Author 自行標 APPROVED。人工審閱不把 trust 升為 VERIFIED。
-- [已授權範例測試](../../docs/operations/repository-context-prompt.md#已授權的範例測試用途)可直接使用 TEST_ONLY/DRAFT，不必逐份人工審閱；仍核對 exact source、引用及支持度，不冒稱正式核准。分報草稿／coverage、審閱 pending 或 TEST_ONLY exception、local commit/activation 與實際 MCP 驗證；本機存稿或人工審閱不等於發布，未啟用明示 UNPUBLISHED。
+- [已授權範例測試](../../docs/operations/repository-context-prompt.md#test_only-測試授權)可直接使用 TEST_ONLY/DRAFT，不必逐份人工審閱；仍核對 exact source、引用及支持度，不冒稱正式核准。分報草稿／coverage、審閱 pending 或 TEST_ONLY exception、local commit/activation 與實際 MCP 驗證；本機存稿或人工審閱不等於發布，未啟用明示 UNPUBLISHED。
 - 草稿生成或比對不覆寫中央文件或使用者編輯。獲具名寫入／啟用授權後交由 [manage-repository](../manage-repository/SKILL.md) 在核准 local Git 文件庫更新具名 Markdown；附 exact primary/related contexts 及真實 review-reference（正式核准時）。工具產生 catalog/digests/local commit/selection，作者不填 JSON、不嵌自身文件 hash。文件 commit 與 source SHA 各自獨立；不需 remote、URL、credentials、push、業務 repo commit 或 prepare_source。CLI 結果仍需另核對 running Document MCP。
 - 每 repo 僅在明確要求時重產；更新失敗或仍待審閱時，保留上一版中央核准文件。跨 repo 變更只列出可能受影響的引用，不自動重產所有 repo 文件。
 - 中央文件流程與既有短版 discovery `navigation-hint` 分開。若另行選擇更新短版 hint，仍須人工核准該摘要、keywords 與 analyzedRevision 的確切內容，並另行授權修改外部設定；未獲授權只交付短版草稿。
 - 草稿與 runtime 分離：建立、修改或儲存 `.local` 草稿都不會改變 MCP 目錄。不得自動解析 Markdown、匯入設定、註冊 repository、prepare/fetch source、發布或重啟服務。
 - 只有明示授權設定變更，才由負責者將核准的 `summary`、`keywords`、`analyzedRevision` 與明確 `review-status: APPROVED` 寫入 Indexer 外部設定 `semantic.repositories.<id>.navigation-hint`；這是既有可選能力，不是中央文件發布。只有明示啟動／重啟 Indexer 才會發布外部設定；之後 Query 對 allowlist 內 repository 的 `list_repositories` 才可能回傳 hint。詳見 [Source MCP operations](../../docs/operations/source-mcp.md#optional-human-reviewed-business-discovery-hint)。
-- repo-local `project-guide-path` 也是另一項既有可選能力，不是中央文件發布。只有明確選擇此 source-published guide 流程時，才依[固定模板](../../docs/operations/repository-context-prompt.md#module-aware-guide-mvp)處理目標 repo 的文件、正常提交與明示 `prepare_source`，並沿用其各自授權；這些步驟不是中央草稿或中央發布的前提。Guide 維持 `NOT_VERIFIED`，不會自動變成 `navigation-hint` metadata。
+- repo-local `project-guide-path` 也是另一項既有可選能力，不是中央文件發布。只有明確選擇此 source-published guide 流程時，才依[固定模板](../../docs/operations/repository-context-prompt.md#module-aware-guide-template)處理目標 repo 的文件、正常提交與明示 `prepare_source`，並沿用其各自授權；這些步驟不是中央草稿或中央發布的前提。Guide 維持 `NOT_VERIFIED`，不會自動變成 `navigation-hint` metadata。

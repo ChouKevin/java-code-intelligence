@@ -1,56 +1,22 @@
 # Document MCP operations
 
-The `document-query` read-only server serves pregenerated navigation from one operator-managed central Git repository. It is independent of Source Query and Indexer. It reads exact Git objects plus an external publication selection; it never fetches, checks out, builds target projects, runs an LLM, prepares source/indexes, publishes documents or deletes Git objects. The same executable offers a separate, explicitly invoked offline local-Git command described below. Elasticsearch, arbitrary historical document search and a publisher API are not provided.
+The `document-query` executable provides offline local-Git document operations and an independent read-only MCP server for pregenerated navigation. The local command generates the catalog, commits explicitly named Markdown and atomically activates a publication selection; operators do not hand-author a catalog. The server reads exact Git objects and that external selection. It never fetches, checks out, builds target projects, runs an LLM, prepares source/indexes, publishes documents or deletes Git objects. Elasticsearch, arbitrary historical document search and a publisher API are not provided.
 
 Navigation is always `NOT_VERIFIED`. Document provenance, operator approval and source readiness are different facts. Business conclusions still require exact-revision Source Query evidence. Read the [query skill](../../skills/query-business-code/SKILL.md) and [central author handoff](repository-context-prompt.md#central-document-handoff).
 
-## Deployment boundary
-
-Build from the reactor root with Java21 and Maven3.9.x:
-
-```bash
-mvn --batch-mode --no-transfer-progress -pl document-query -am -DskipTests package
-```
-
-The executable is `document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar`. Its component scan is confined to `com.java.semantic.document`; only JDK-only `semantic-model` contracts are shared. The module does not depend on Source Query/Indexer implementation, SQLite, JavaParser/JDT or the AI model stack. JGit reads the document repository, not business repositories. Existing source images copy the additional reactor POM for Maven resolution but gain no document Git mount or document runtime. No separate document image is included.
-
-Configure these required values explicitly:
-
-| Setting | Meaning |
-| --- | --- |
-| `document.repository-id` | Stable document repository ID, same validator as source IDs |
-| `document.git-directory` | Absolute managed Git directory, for example an operator-owned bare repository |
-| `document.publication-file` | Absolute external selection file; not a branch or Git HEAD |
-| `document.collection-purpose` | `TEST_ONLY` or `APPROVED`; no implicit mode |
-| `DOCUMENT_QUERY_API_TOKEN` | Separate nonblank document read credential |
-
-Supply Git objects and the selection read-only to the service account. Their parent directories must not be writable by untrusted document authors; filesystem links cannot redirect the configured namespace. Keep source storage, Indexer admin data, business clones and Git credentials out of this process. Use controlled TLS/ingress for non-loopback access. Do not reuse the Source Query or Indexer token.
-
-After the operator has populated valid objects/catalog and selection, one local launch form is:
-
-```bash
-: "${DOCUMENT_REPOSITORY_ID:?Set the approved document repository ID}"
-: "${DOCUMENT_GIT_DIRECTORY:?Set the absolute managed Git directory}"
-: "${DOCUMENT_PUBLICATION_FILE:?Set the absolute selection file}"
-: "${DOCUMENT_COLLECTION_PURPOSE:?Set TEST_ONLY or APPROVED}"
-: "${DOCUMENT_QUERY_API_TOKEN:?Inject the separate read secret}"
-export DOCUMENT_QUERY_API_TOKEN
-java -Xms64m -Xmx256m -XX:ActiveProcessorCount=2 \
-  -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar \
-  --server.address=127.0.0.1 --server.port=8082 \
-  --document.repository-id="$DOCUMENT_REPOSITORY_ID" \
-  --document.git-directory="$DOCUMENT_GIT_DIRECTORY" \
-  --document.publication-file="$DOCUMENT_PUBLICATION_FILE" \
-  --document.collection-purpose="$DOCUMENT_COLLECTION_PURPOSE"
-```
-
-These heaps are bounded verification examples, not a production capacity guarantee. Check host/backing-host headroom before local verification; see [testing](testing.md). Missing/invalid configuration or invalid initial publication fails startup. There is no empty-success fallback.
-
 ## Local Git document commands
 
+Start with the offline workflow below; artifact packaging and read-only server
+launch are in [Deployment boundary](#deployment-boundary). Update named Markdown,
+inspect local status, then separately confirm actual Document MCP adoption.
+
 Use [manage-repository](../../skills/manage-repository/SKILL.md) to route source,
-index, drafting and document-update operations. Document updates need no business
-repo preparation, remote, network access or Query token. The CLI exits before
+index, drafting and document-update operations. First obtain approval for the
+local document namespace, named Markdown, exact primary/related source contexts
+and the intended write/activation. Formal APPROVED content requires exact-content
+human review; TEST_ONLY drafting/use requires current explicit user approval,
+not an old fixture's standing grant. Document updates need no business-repo
+preparation, remote, network access or Query token. The CLI exits before
 Spring/web startup; the MCP server remains read-only.
 
 For this command, initialize an ordinary local Git repository with `git init -b main`
@@ -95,8 +61,9 @@ updates require that reference. `activate` also accepts repeated `--withdraw`.
 Source and document SHAs are separate full lowercase 40-character identities.
 `--help` needs no configuration; `status` does not create a publication.
 
-The command generates `navigation-catalog.json`, validates the complete retained
-selection with the reader's admission rules, commits raw named files and catalog,
+The command generates `navigation-catalog.json`; it is not an author input.
+It validates the complete retained selection with the reader's admission rules,
+commits raw named files and catalog,
 then atomically replaces the external selection. It refuses any pre-existing staged
 changes or manual catalog edits. Unrelated tracked/untracked working files and
 unselected committed catalog entries remain untouched. Hooks, clean filters,
@@ -119,7 +86,52 @@ lock left by a killed process requires proving that no writer is alive before
 operator-authorized removal; do not delete another process's lock.
 
 
+## Deployment boundary
+
+Build from the reactor root with Java21 and Maven3.9.x:
+
+```bash
+mvn --batch-mode --no-transfer-progress -pl document-query -am -DskipTests package
+```
+
+The executable is `document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar`. Its component scan is confined to `com.java.semantic.document`; only JDK-only `semantic-model` contracts are shared. The module does not depend on Source Query/Indexer implementation, SQLite, JavaParser/JDT or the AI model stack. JGit reads the document repository, not business repositories. Existing source images copy the additional reactor POM for Maven resolution but gain no document Git mount or document runtime. No separate document image is included.
+
+Configure these required values explicitly:
+
+| Setting | Meaning |
+| --- | --- |
+| `document.repository-id` | Stable document repository ID, same validator as source IDs |
+| `document.git-directory` | Absolute managed Git directory, for example an operator-owned bare repository |
+| `document.publication-file` | Absolute external selection file; not a branch or Git HEAD |
+| `document.collection-purpose` | `TEST_ONLY` or `APPROVED`; no implicit mode |
+| `DOCUMENT_QUERY_API_TOKEN` | Separate nonblank document read credential |
+
+Supply Git objects and the selection read-only to the service account. Their parent directories must not be writable by untrusted document authors; filesystem links cannot redirect the configured namespace. Keep source storage, Indexer admin data, business clones and Git credentials out of this process. Use controlled TLS/ingress for non-loopback access. Do not reuse the Source Query or Indexer token.
+
+After the operator has populated valid objects/catalog and selection, one local launch form is:
+
+```bash
+: "${DOCUMENT_REPOSITORY_ID:?Set the approved document repository ID}"
+: "${DOCUMENT_GIT_DIRECTORY:?Set the absolute managed Git directory}"
+: "${DOCUMENT_PUBLICATION_FILE:?Set the absolute selection file}"
+: "${DOCUMENT_COLLECTION_PURPOSE:?Set TEST_ONLY or APPROVED}"
+: "${DOCUMENT_QUERY_API_TOKEN:?Inject the separate read secret}"
+export DOCUMENT_QUERY_API_TOKEN
+java -Xms64m -Xmx256m -XX:ActiveProcessorCount=2 \
+  -jar document-query/target/document-query-0.0.1-SNAPSHOT-exec.jar \
+  --server.address=127.0.0.1 --server.port=8082 \
+  --document.repository-id="$DOCUMENT_REPOSITORY_ID" \
+  --document.git-directory="$DOCUMENT_GIT_DIRECTORY" \
+  --document.publication-file="$DOCUMENT_PUBLICATION_FILE" \
+  --document.collection-purpose="$DOCUMENT_COLLECTION_PURPOSE"
+```
+
+These heaps are bounded verification examples, not a production capacity guarantee. Check host/backing-host headroom before local verification; see [testing](testing.md). Missing/invalid configuration or invalid initial publication fails startup. There is no empty-success fallback.
+
 ## Central Git catalog
+
+This schema is a technical reference for generated/admitted artifacts, not a
+manual authoring workflow. Use the local command above for document updates.
 
 Each selected actual commit contains `navigation-catalog.json` and its listed Markdown blobs. Files must be directly under `repositories/<primaryRepositoryId>/`; recommended filenames are `description.md` and `guide.md`, with other `.md` filenames in the same directory allowed. Membership is the catalog, not tree existence. Unlisted files are ignored. Nested directories, unsafe path segments, links/gitlinks, malformed UTF-8, empty Markdown and controls other than CR/LF/TAB are rejected. Git filters, hooks, submodule initialization and LFS hydration do not run.
 
@@ -252,4 +264,4 @@ An oversized candidate's full contextual read is an admission-capacity refusal: 
 Use `bash scripts/test-document-mcp.sh` for both packaged native journeys after resource admission. They snapshot the executable into an exclusively owned temporary root, exercise real CLI/HTTP/MCP and exact Git blobs, including update, old-pin continuation, rollback and explicit withdrawal, reap owned child processes, remove private test storage/logs and retain sanitized acceptance. They do not authorize images, existing-service restarts or project commits.
 Interrupted teardown still completes graceful/forced termination and restores owner interruption only after reaping. A running-ownership marker is cleared only after actual child exit; if termination remains unconfirmed, the launcher retains the private work root instead of deleting underneath a possibly live process.
 
-External acceptance explicitly selects `gpt-6-luna`, gives the agent only Document MCP and Source Query MCP, and records the client/version/invocation, complete tool trace and source-grounded answer. Scenarios cover current and historical source contexts, thin/no-hit document guidance and document replacement. Do not preload document bodies or author traces, rewrite the agent answer, or substitute local reads/preparation calls for MCP evidence. Native and agent results are separate evidence in [testing](testing.md) and the [agent checklist](mcp-agent-acceptance.md).
+External acceptance explicitly selects `gpt-6-luna`, gives the agent only Document MCP and Source Query MCP, and records the client/version/invocation, complete tool trace and source-grounded answer. Scenarios cover current and historical source contexts, thin/no-hit document guidance and document replacement. Do not preload document bodies or author traces, rewrite the agent answer, or substitute local reads/preparation calls for MCP evidence. Native and agent results are separate evidence in [current verification status](testing.md#current-verification-status) and the [agent checklist](mcp-agent-acceptance.md). Local evidence does not establish image/CI, deployment UID isolation or production capacity acceptance.

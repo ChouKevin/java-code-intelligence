@@ -1,13 +1,13 @@
 # Source MCP: deployment and operation
 
-This release is source-first with an optional Java syntax index, not the old semantic-review service. Indexer is the **only writer** and holds approved Git URLs/credentials, private source/index jobs and staging. Query has a distinct read token and accesses only immutable published source/index; it never calls Indexer, fetches Git, prepares commits, parses Java or executes repository code. Both are separate Java 21 processes; use a local POSIX filesystem, not NFS or independent distributed mounts. Indexer embeds JavaParser 3.28.2; both services embed SQLite JDBC 3.53.4.0. No external database, MongoDB, inference server or target-repository build is required.
+The service is source-first with optional Java syntax and static Relations indexes. Indexer is the **only writer** and holds approved Git URLs/credentials, private source/index jobs and staging. Query has a distinct read token and accesses only immutable published source/index; it never calls Indexer, fetches Git, prepares commits, parses Java or executes repository code. Both are separate Java 21 processes; use a local POSIX filesystem, not NFS or independent distributed mounts. Indexer embeds JavaParser 3.28.2; both services embed SQLite JDBC 3.53.4.0. No external database, inference server or target-repository build is required.
 
 ## Local-only configuration and evidence
 
 Keep the actual source repository IDs, Git URLs, branch assignments, guide paths,
-Query allowlist and MCP client settings outside version control. This includes
-the operator's nine-repository deployment: the public repo ships configuration
-keys and synthetic fixtures, not that deployment's inventory.
+Query allowlist and MCP client settings outside version control. The public repo
+ships configuration keys and synthetic fixtures, not an operator's deployment
+inventory.
 
 Prefer configuration outside this checkout. When local files are needed here,
 use ignored `.local/indexer.yml` and `.local/query.yml`, with separate environments
@@ -110,8 +110,9 @@ java -jar semantic-query/target/semantic-query-0.0.1-SNAPSHOT-exec.jar \
   --server.address=127.0.0.1 --server.port=8080
 ```
 
-For an already authenticated Codex CLI supporting these flags (tested client
-version: 0.160.0), register **only Query** for one invocation. Inject
+For an already authenticated Codex CLI, register **only Query** for one invocation.
+The flags below are supported by installed client 0.162.1; check your client's
+`codex --help` and `codex exec --help` when using another version. Inject
 `SOURCE_QUERY_TOKEN` from the read-token secret store into this client process;
 do not place the secret value in the command or global client configuration.
 
@@ -500,7 +501,7 @@ POST /api/v1/search-text             {"context":{"repositoryId":"video","revisio
 POST /api/v1/source                  {"context":{"repositoryId":"video","revision":"d366278ff697b2ac7d0510830a840a475ec31794"},"path":"src/main/java/com/example/video/VideoController.java"}
 ```
 
-The sample SHA below is **A from a disposable observed fixture**, not a promise that it is current; replace it with the exact context returned by `get_context`. An omitted `get_context` revision observes the current SHA from the most recent successful default-branch refresh; an explicit SHA requires exact published membership and never falls back to current. First list may show `NOT_PREPARED`, `PREPARING` or `FAILED` without a revision. Ready source has `sourceStatus: READY`; independent `semanticStatus` is `NOT_READY` without an index, `READY` with compatible index metadata, or `UNAVAILABLE` for known invalid metadata. The optional index summary supplies generation/profile/coverage, not proof that every Java file parsed or a JDBC health check. `get_context` performs no fetch or preparation. Keep each returned `{repositoryId, revision}` fixed for every subsequent read.
+The sample ID, SHA and paths above are examples, not configured deployment identities; replace them with your approved repository and exact context returned by `get_context`. An omitted `get_context` revision observes the current SHA from the most recent successful default-branch refresh; an explicit SHA requires exact published membership and never falls back to current. First list may show `NOT_PREPARED`, `PREPARING` or `FAILED` without a revision. Ready source has `sourceStatus: READY`; independent `semanticStatus` is `NOT_READY` without an index, `READY` with compatible index metadata, or `UNAVAILABLE` for known invalid metadata. The optional index summary supplies generation/profile/coverage, not proof that every Java file parsed or a JDBC health check. `get_context` performs no fetch or preparation. Keep each returned `{repositoryId, revision}` fixed for every subsequent read.
 
 `list_repositories` and `list_files` default to 20 items, maximum 100. `list_files` defaults to `depth: 1`; `depth: 2` emits flat preorder with at most 12 immediate children for each direct-child directory. Each directory reports `childPreview: COMPLETE`, `ELIDED` or `NOT_EXPANDED`; `ELIDED` means explicitly call `list_files` on that directory. The global page limit counts all emitted entries, including directories, and its cursor resumes at the actual next item even if a preview was paused. Cursors bind exact repo/revision, directory, depth, preview and limit. Complete HTTP/MCP results are bounded at 512 KiB; no unbounded tree or fabricated child count is returned.
 
@@ -518,7 +519,7 @@ the validation of the cursor's actual raw position and selected windows.
 
 `SourceResult` has no top-level continuous `content` alias. It reports exact context/path, `blobId`, `contentDigest`, `byteLength`, requested/effective view and selection, `summaryOutcome`, optional `indexGeneration`/`profile`, ordered `segments`, `hasMore`, `nextCursor` and `stopReason`. A `SOURCE` segment carries lossless original text and its exact half-open UTF-8 byte and one-based LF line span, plus mid-line flags. An `ELISION` segment carries the omitted original span, `foldKind` and `declarationId`, but no source content. Selection gaps are not elisions; intentional folding does not itself mean another page exists. Each page has at most 500 segments, at most 65,536 source-content bytes and the requested `maxLines`; full HTTP/MCP serialization is at most 512 KiB. `stopReason` distinguishes completion from line/content/segment/wire budgets. Cursor continuation pins the same source digest, request/view/effective selection and generation; it never changes an auto-selected raw view or summary generation.
 
-Successful MCP `read_source` now uses a model-facing numbered text presentation,
+Successful MCP `read_source` uses a model-facing numbered text presentation,
 not a duplicate JSON string. HTTP responses and MCP `structuredContent` remain the
 same `SourceResult`, including original Unicode/CRLF content and exact digests,
 byte spans, selection, generation/profile and cursors. Consumers parsing
@@ -557,7 +558,7 @@ Business-discovery `list_repositories` also has a 160 KiB complete application-r
 
 Only tracked regular supported text at the pinned commit is readable. The same policy excludes `.git`, `target`, `build`, `.gradle`, `node_modules`, `generated` at any depth and `*.class`; direct read cannot bypass it. Symlinks are not followed, submodules are not initialized, binary/unsupported encoding/path/LFS pointers are explicitly unsupported; no filters, hooks, LFS hydration or build scripts execute. A guide optionally committed at configured `project-guide-path` is `AVAILABLE`, `MISSING`, `INVALID` or `DISABLED`, always `freshness: NOT_VERIFIED` if represented. It is a navigation hint, not verified business truth, and its absence never blocks source readiness. See the [external authoring prompt](repository-context-prompt.md).
 
-A [module-aware guide](repository-context-prompt.md#module-aware-guide-mvp) may
+A [module-aware guide](repository-context-prompt.md#module-aware-guide-template) may
 describe application/library modules, business lookup starts and candidate
 relationships. Its module IDs and relation labels are ordinary Markdown, not new
 MCP parameters or indexed facts. For an existing repo-local guide, Query returns
@@ -565,15 +566,18 @@ the file at the selected source SHA; source evidence on each side remains indepe
 pinned. No parser/index is required, and existing token/allowlist/containment/admin
 boundaries remain unchanged.
 
-The new [central document handoff](repository-context-prompt.md#central-document-handoff)
+The [central document handoff](repository-context-prompt.md#central-document-handoff)
 is external to this source-publication mechanism. An author directly reads approved
-exact local Git source, stages private drafts, and hands exact human-reviewed content
-to a separately authorized central Git document repository. This does not change the
-MCP catalog, require business-repo commits/prepare, or publish navigation-hint settings.
-Document Git revisions are distinct from business-source SHAs; query requests retain
-the latter. Future Elasticsearch and external document MCP search/read consume approved
-document versions independently; they are not implemented or connected by this service.
-Failed or pending document refresh leaves the last approved version unchanged.
+exact local Git source, stages private drafts, and hands exact reviewed content
+or explicitly authorized TEST_ONLY drafts to a separately authorized local Git
+document repository. No business-repo commit/prepare or navigation-hint setting
+change is required. The [local document command](document-mcp.md#local-git-document-commands)
+generates the catalog, commits named Markdown and activates the selection;
+independent read-only Document MCP serves its admitted active/retained revisions.
+Document commits are distinct from business-source SHAs and never select source
+current. Local activation is not proof of running-service adoption; check actual
+Document MCP identities and publication status. Failed or pending refresh does not
+authorize replacing the last approved content. Elasticsearch is not provided.
 
 
 ## Prepare and navigate the Java index
@@ -910,7 +914,7 @@ non-current revisions may later be withdrawn by GC. Readership remains
 independent of Indexer/remote availability while source membership remains.
 
 For an index rollout/rebuild, first confirm the selected release has the required
-[acceptance evidence](testing.md); local native results alone are insufficient.
+[acceptance evidence](testing.md#current-verification-status); local native results alone are insufficient.
 Preserve policy-2 source roots and receipts unchanged. Provision the separate
 index child and process-private JNI temp storage/permissions; deploy matching
 writer/reader releases with separate credentials and the two Query read-only
