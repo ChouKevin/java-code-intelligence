@@ -12,6 +12,8 @@ import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.index.IndexFailure;
 import com.java.semantic.model.source.SourceReadContract.FileCollection;
 import com.java.semantic.model.source.SourceReadContract.FileListRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindResult;
 import com.java.semantic.model.source.SourceReadContract.ReadSourceRequest;
 import com.java.semantic.model.source.SourceReadContract.SemanticStatus;
 import com.java.semantic.model.source.SourceReadContract.SourceResult;
@@ -49,6 +51,9 @@ class SourceTransportErrorParityTest {
                 @Override public FileCollection listFiles(AdmittedSourceRevision revision, FileListRequest request) {
                     throw new SourceQueryException(code, new IllegalStateException("/private/credentials"));
                 }
+                @Override public FileFindResult findFiles(AdmittedSourceRevision revision, FileFindRequest request) {
+                    throw new SourceQueryException(code, new IllegalStateException("/private/credentials"));
+                }
                 @Override public TextSearchResult searchText(AdmittedSourceRevision revision, TextSearchRequest request) {
                     throw new SourceQueryException(code, new IllegalStateException("/private/credentials"));
                 }
@@ -62,16 +67,18 @@ class SourceTransportErrorParityTest {
             MockMvc http = standaloneSetup(new SemanticQueryController(facade))
                     .setControllerAdvice(new QueryApiExceptionHandler())
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper)).build();
-            Map<String, Object> input = Map.of("context", Map.of("repositoryId", "sample", "revision",
-                    SourceFilesystemFixture.SHA), "path", "Order.java");
-            String payload = http.perform(post("/api/v1/source").contentType("application/json")
-                    .content(fixture.mapper.writeValueAsBytes(input))).andExpect(status().is(caseUnderTest.getValue()))
-                    .andReturn().getResponse().getContentAsString();
-            McpServerFeatures.SyncToolSpecification tool = new QueryMcpToolCatalogConfiguration()
-                    .mcpQueryToolSpecifications(facade, fixture.mapper).stream()
-                    .filter(value -> value.tool().name().equals("read_source")).findFirst().orElseThrow();
-            McpSchema.CallToolResult mcp = tool.callHandler().apply(null,
-                    McpSchema.CallToolRequest.builder("read_source").arguments(input).build());
+            for (String operation : java.util.List.of("read_source", "find_files")) {
+                Map<String, Object> input = Map.of("context", Map.of("repositoryId", "sample", "revision",
+                        SourceFilesystemFixture.SHA), operation.equals("read_source") ? "path" : "filePattern", "Order.java");
+                String route = operation.equals("read_source") ? "/api/v1/source" : "/api/v1/find-files";
+                String payload = http.perform(post(route).contentType("application/json")
+                        .content(fixture.mapper.writeValueAsBytes(input))).andExpect(status().is(caseUnderTest.getValue()))
+                        .andReturn().getResponse().getContentAsString();
+                McpServerFeatures.SyncToolSpecification tool = new QueryMcpToolCatalogConfiguration()
+                        .mcpQueryToolSpecifications(facade, fixture.mapper).stream()
+                        .filter(value -> value.tool().name().equals(operation)).findFirst().orElseThrow();
+                McpSchema.CallToolResult mcp = tool.callHandler().apply(null,
+                        McpSchema.CallToolRequest.builder(operation).arguments(input).build());
             JsonNode httpJson = fixture.mapper.readTree(payload);
             assertThat(httpJson).isEqualTo(fixture.mapper.readTree(fixture.mapper.writeValueAsString(mcp.structuredContent())));
             assertThat(fixture.mapper.readTree(((McpSchema.TextContent) mcp.content().getFirst()).text()))
@@ -79,6 +86,7 @@ class SourceTransportErrorParityTest {
             assertThat(mcp.isError()).isTrue();
             assertThat(httpJson.get("code").asString()).isEqualTo(code.name());
             assertThat(payload).doesNotContain("private", "credentials");
+            }
         }
     }
 

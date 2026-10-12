@@ -321,6 +321,7 @@ class DocumentCatalogAdmissionTest {
                         JsonNode tool = tools.get(index);
                         String name = tool.path("name").stringValue();
                         Map<String, Object> arguments = "search_documents".equals(name) ? Map.of("query", "x")
+                                : "list_documents".equals(name) ? Map.of()
                                 : Map.of("documentContext", Map.of("documentRepositoryId", DocumentFixture.DOCUMENT_REPOSITORY,
                                         "repositoryId", "sample", "documentRevision", first), "path", DocumentFixture.GUIDE, "sectionStartLine", 1);
                         JsonNode wire = fixture.mapper.valueToTree(facade.execute(name, arguments));

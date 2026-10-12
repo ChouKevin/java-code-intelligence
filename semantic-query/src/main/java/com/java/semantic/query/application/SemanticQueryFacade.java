@@ -9,6 +9,8 @@ import com.java.semantic.model.source.SourceReadContract.ContextRequest;
 import com.java.semantic.model.source.SourceReadContract.ContextResult;
 import com.java.semantic.model.source.SourceReadContract.FileCollection;
 import com.java.semantic.model.source.SourceReadContract.FileListRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindResult;
 import com.java.semantic.model.source.SourceReadContract.ReadSourceRequest;
 import com.java.semantic.model.source.SourceReadContract.RepositoryCollection;
 import com.java.semantic.model.source.SourceReadContract.RepositoryRequest;
@@ -50,6 +52,7 @@ public final class SemanticQueryFacade {
             case "list_repositories" -> listRepositories(SemanticQueryInput.repositories(input));
             case "get_context" -> getContext(SemanticQueryInput.getContext(input));
             case "list_files" -> listFiles(SemanticQueryInput.listFiles(input));
+            case "find_files" -> findFiles(SemanticQueryInput.findFiles(input));
             case "search_text" -> searchText(SemanticQueryInput.searchText(input));
             case "read_source" -> readSource(SemanticQueryInput.readSource(input));
             case "search_code" -> searchCode(IndexQueryInput.searchCode(input));
@@ -79,6 +82,11 @@ public final class SemanticQueryFacade {
     public TextSearchResult searchText(TextSearchRequest request) {
         return SourceOperationDeadline.within(Duration.ofSeconds(5),
                 () -> admittedSearch(request.context(), false, admitted -> source.searchText(admitted, request)));
+    }
+
+    public FileFindResult findFiles(FileFindRequest request) {
+        return SourceOperationDeadline.within(Duration.ofSeconds(5),
+                () -> admittedSearch(request.context(), false, admitted -> source.findFiles(admitted, request)));
     }
 
     public SourceResult readSource(ReadSourceRequest request) {

@@ -22,8 +22,11 @@ public final class DocumentCursorCodec {
     private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
     private static final Pattern GLOBAL_VERSION = Pattern.compile("[0-9a-f]{64}");
 
-    record Cursor(Optional<String> repositoryId, String version, String query, int limit, String path, int sectionStartLine) { }
-    private record Payload(Optional<String> repositoryId, String version, String query, int limit, String path, int sectionStartLine) { }
+    enum Operation { SEARCH, LIST }
+    record Cursor(Operation operation, Optional<String> repositoryId, String version, Optional<String> query,
+            int limit, String path, Optional<Integer> sectionStartLine) { }
+    private record Payload(Operation operation, Optional<String> repositoryId, String version, Optional<String> query,
+            int limit, String path, Optional<Integer> sectionStartLine) { }
 
     private final ObjectMapper mapper;
     private final byte[] key = new byte[32];
@@ -34,9 +37,10 @@ public final class DocumentCursorCodec {
     }
 
     String encode(Cursor cursor) {
-        validate(cursor.repositoryId(), cursor.version(), cursor.query(), cursor.limit(), cursor.path(), cursor.sectionStartLine());
-        byte[] payload = mapper.writeValueAsBytes(new Payload(cursor.repositoryId(), cursor.version(), cursor.query(), cursor.limit(),
-                cursor.path(), cursor.sectionStartLine()));
+        validate(cursor.operation(), cursor.repositoryId(), cursor.version(), cursor.query(), cursor.limit(),
+                cursor.path(), cursor.sectionStartLine());
+        byte[] payload = mapper.writeValueAsBytes(new Payload(cursor.operation(), cursor.repositoryId(), cursor.version(),
+                cursor.query(), cursor.limit(), cursor.path(), cursor.sectionStartLine()));
         String token = ENCODER.encodeToString(payload) + "." + ENCODER.encodeToString(sign(payload));
         if (token.length() > DocumentContract.MAX_CURSOR_BYTES) {
             throw new IllegalStateException("Generated document cursor exceeded its fixed bound");
@@ -77,24 +81,38 @@ public final class DocumentCursorCodec {
         if (Objects.isNull(decoded)) {
             throw invalid();
         }
-        validate(decoded.repositoryId(), decoded.version(), decoded.query(), decoded.limit(), decoded.path(), decoded.sectionStartLine());
-        return new Cursor(decoded.repositoryId(), decoded.version(), decoded.query(), decoded.limit(), decoded.path(), decoded.sectionStartLine());
+        validate(decoded.operation(), decoded.repositoryId(), decoded.version(), decoded.query(), decoded.limit(),
+                decoded.path(), decoded.sectionStartLine());
+        return new Cursor(decoded.operation(), decoded.repositoryId(), decoded.version(), decoded.query(),
+                decoded.limit(), decoded.path(), decoded.sectionStartLine());
     }
 
-    private static void validate(Optional<String> repositoryId, String version, String query, int limit, String path, int sectionStartLine) {
+    private static void validate(Operation operation, Optional<String> repositoryId, String version,
+            Optional<String> query, int limit, String path, Optional<Integer> sectionStartLine) {
         try {
+            Objects.requireNonNull(operation);
             Objects.requireNonNull(repositoryId);
+            Objects.requireNonNull(query);
+            Objects.requireNonNull(sectionStartLine);
             if (repositoryId.isPresent()) {
                 new RepositoryId(repositoryId.orElseThrow());
                 RepositoryRevision.ofSha(version);
             } else if (Objects.isNull(version) || !GLOBAL_VERSION.matcher(version).matches()) { throw invalid(); }
         } catch (IllegalArgumentException | NullPointerException exception) { throw invalid(); }
-        if (Objects.isNull(query) || query.isBlank()
-                || query.codePointCount(0, query.length()) > DocumentContract.MAX_QUERY_CODE_POINTS
-                || limit < 1 || limit > DocumentContract.MAX_LIMIT
+        if (limit < 1 || limit > DocumentContract.MAX_LIMIT
                 || Objects.isNull(path) || path.isEmpty() || path.length() > DocumentContract.MAX_PATH_BYTES
-                || path.getBytes(StandardCharsets.UTF_8).length > DocumentContract.MAX_PATH_BYTES
-                || sectionStartLine < 1) {
+                || path.getBytes(StandardCharsets.UTF_8).length > DocumentContract.MAX_PATH_BYTES) {
+            throw invalid();
+        }
+        if (operation == Operation.SEARCH) {
+            if (query.isEmpty() || sectionStartLine.isEmpty()) { throw invalid(); }
+            String cursorQuery = query.orElseThrow();
+            if (cursorQuery.isBlank()
+                    || cursorQuery.codePointCount(0, cursorQuery.length()) > DocumentContract.MAX_QUERY_CODE_POINTS
+                    || sectionStartLine.orElseThrow() < 1) {
+                throw invalid();
+            }
+        } else if (query.isPresent() || sectionStartLine.isPresent()) {
             throw invalid();
         }
     }

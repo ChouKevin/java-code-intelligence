@@ -17,14 +17,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.json.JsonMapper;
 
 class SearchAdmissionTest {
     @TempDir Path temp;
-    @Test
-    void searches_reserve_capacity_before_admission_and_release_it_after_failure_and_exit() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void searches_and_discovery_reserve_capacity_before_admission_and_release_it_after_failure_and_exit(boolean discovery) throws Exception {
         SourceContext context = new SourceContext("sample", "0123456789abcdef0123456789abcdef01234567");
         TextSearchRequest request = new TextSearchRequest(context, "needle", "", Optional.empty(), 1);
         CountDownLatch firstEntered = new CountDownLatch(1);
@@ -55,6 +57,9 @@ class SearchAdmissionTest {
         };
         RepositorySourcePort source = new RepositorySourcePort() {
             @Override public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest value) { throw new UnsupportedOperationException(); }
+            @Override public FileFindResult findFiles(AdmittedSourceRevision admitted, FileFindRequest value) {
+                throw new AssertionError("admission must fail before discovery");
+            }
             @Override public TextSearchResult searchText(AdmittedSourceRevision admitted, TextSearchRequest value) {
                 throw new AssertionError("admission must fail before search");
             }
@@ -66,16 +71,16 @@ class SearchAdmissionTest {
         AtomicReference<SourceQueryException> firstError = new AtomicReference<>();
         AtomicReference<SourceQueryException> secondError = new AtomicReference<>();
         AtomicReference<SourceQueryException> fourthError = new AtomicReference<>();
-        Thread first = Thread.ofVirtual().start(() -> capture(facade, request, firstError));
+        Thread first = Thread.ofVirtual().start(() -> capture(facade, request, discovery, firstError));
         assertThat(firstEntered.await(2, TimeUnit.SECONDS)).isTrue();
-        Thread second = Thread.ofVirtual().start(() -> capture(facade, request, secondError));
+        Thread second = Thread.ofVirtual().start(() -> capture(facade, request, discovery, secondError));
         Thread fourth = null;
         AtomicReference<Throwable> thirdError = new AtomicReference<>();
         Thread third = null;
         try {
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             third = Thread.ofVirtual().start(() -> {
-                try { facade.searchText(request); }
+                try { execute(facade, request, discovery); }
                 catch (Throwable exception) { thirdError.set(exception); }
             });
             third.join(500);
@@ -95,7 +100,7 @@ class SearchAdmissionTest {
             first.join(2000);
             assertThat(first.isAlive()).isFalse();
             assertThat(firstError.get().code()).isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE);
-            fourth = Thread.ofVirtual().start(() -> capture(facade, request, fourthError));
+            fourth = Thread.ofVirtual().start(() -> capture(facade, request, discovery, fourthError));
             assertThat(fourthEntered.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(admissions.get()).isEqualTo(3);
         } finally {
@@ -112,8 +117,13 @@ class SearchAdmissionTest {
     }
 
     private static void capture(SemanticQueryFacade facade, TextSearchRequest request,
-            AtomicReference<SourceQueryException> outcome) {
-        try { facade.searchText(request); }
+            boolean discovery, AtomicReference<SourceQueryException> outcome) {
+        try { execute(facade, request, discovery); }
         catch (SourceQueryException exception) { outcome.set(exception); }
+    }
+
+    private static void execute(SemanticQueryFacade facade, TextSearchRequest request, boolean discovery) {
+        if (discovery) facade.findFiles(new FileFindRequest(request.context(), "**", "", request.limit(), Optional.empty()));
+        else facade.searchText(request);
     }
 }

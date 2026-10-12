@@ -17,6 +17,38 @@ class SourceInputBoundaryTest {
     private static final Map<String, Object> CONTEXT = Map.of("repositoryId", "orders", "revision", "a".repeat(40));
 
     @Test
+    void file_discovery_requires_exact_context_and_pattern_and_binds_only_its_page_scope() {
+        com.java.semantic.model.source.SourceReadContract.FileFindRequest request =
+                SemanticQueryInput.findFiles(Map.of("context", CONTEXT, "filePattern", "*.java"));
+        assertThat(request.context().revision()).isEqualTo("a".repeat(40));
+        assertThat(request.filePattern()).isEqualTo("*.java");
+        assertThat(request.directory()).isEmpty();
+        assertThat(request.limit()).isEqualTo(20);
+        assertThat(request.cursor()).isEmpty();
+        assertThat(SemanticQueryInput.findFiles(Map.of("context", CONTEXT, "filePattern", "**", "limit", 100)).limit()).isEqualTo(100);
+        for (Map<String, Object> input : List.<Map<String, Object>>of(Map.of("context", CONTEXT),
+                Map.of("filePattern", "**"), Map.of("context", CONTEXT, "filePattern", "**", "query", "unused"),
+                Map.of("context", CONTEXT, "filePattern", "**", "depth", 2),
+                Map.of("context", Map.of("repositoryId", "orders", "revision", "main"), "filePattern", "**"),
+                Map.of("context", Map.of("repositoryId", "orders"), "filePattern", "**"))) {
+            assertThatThrownBy(() -> SemanticQueryInput.findFiles(input)).isInstanceOf(IllegalArgumentException.class);
+        }
+        for (String field : List.of("context", "filePattern", "directory", "limit", "cursor")) {
+            Map<String, Object> input = new HashMap<>(Map.of("context", CONTEXT, "filePattern", "**"));
+            input.put(field, null);
+            assertThatThrownBy(() -> SemanticQueryInput.findFiles(input)).isInstanceOf(IllegalArgumentException.class);
+        }
+        for (Object limit : List.of("1", 1.5, Long.MAX_VALUE, 0, 101, true)) {
+            assertThatThrownBy(() -> SemanticQueryInput.findFiles(Map.of("context", CONTEXT, "filePattern", "**", "limit", limit)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        for (String pattern : List.of("", " ", "😀".repeat(257), "\uD800", "a\nb")) {
+            assertThatThrownBy(() -> SemanticQueryInput.findFiles(Map.of("context", CONTEXT, "filePattern", pattern)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void bindsAnExactSourceWindowWithoutAcceptingAnObsoleteTargetUnion() {
         ReadSourceRequest request = SemanticQueryInput.readSource(Map.of("context", CONTEXT,
                 "path", "src/付款 flow😀.java", "startLine", 5, "maxLines", 7));
@@ -67,7 +99,7 @@ class SourceInputBoundaryTest {
     }
 
     @Test
-    void countsUnicodeCodePointsAndRejectsMultilineOrNegatedGlobSearches() {
+    void countsUnicodeCodePointsAndRejectsMultilineSearches() {
         assertThat(SemanticQueryInput.searchText(Map.of("context", CONTEXT, "query", "😀".repeat(256))).query())
                 .isEqualTo("😀".repeat(256));
         for (String invalidQuery : List.of("😀".repeat(257), "first\nsecond", "first\rsecond", "a\u0000b")) {
@@ -75,9 +107,26 @@ class SourceInputBoundaryTest {
                     .isInstanceOf(IllegalArgumentException.class);
         }
         assertThatThrownBy(() -> SemanticQueryInput.searchText(Map.of("context", CONTEXT,
-                "query", "literal", "filePattern", "!**/A.java"))).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> SemanticQueryInput.searchText(Map.of("context", CONTEXT,
                 "query", "literal", "cursor", "old-search-cursor"))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void pattern_binding_preserves_glob_syntax_and_literal_path_validation() {
+        for (String pattern : List.of("😀".repeat(256), "{src,{lib,app}}/**/*.java", "a\\?.java", "[!é-😀].java")) {
+            assertThat(SemanticQueryInput.searchText(Map.of("context", CONTEXT, "query", "literal",
+                    "filePattern", pattern)).filePattern()).contains(pattern);
+        }
+        for (String pattern : List.of("", " ", "😀".repeat(257), "\uD800", "a\nb", "a\u007fb")) {
+            assertThatThrownBy(() -> SemanticQueryInput.searchText(Map.of("context", CONTEXT, "query", "literal",
+                    "filePattern", pattern))).isInstanceOf(IllegalArgumentException.class);
+        }
+        Map<String, Object> explicitNull = new HashMap<>(Map.of("context", CONTEXT, "query", "literal"));
+        explicitNull.put("filePattern", null);
+        assertThatThrownBy(() -> SemanticQueryInput.searchText(explicitNull)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> SemanticQueryInput.searchText(Map.of("context", CONTEXT, "query", "literal",
+                "directory", "../src"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> SemanticQueryInput.readSource(Map.of("context", CONTEXT, "path", "a\\?.java")))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

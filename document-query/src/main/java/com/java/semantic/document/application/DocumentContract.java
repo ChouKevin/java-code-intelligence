@@ -46,6 +46,7 @@ public final class DocumentContract {
     }
     public record Section(int startLine, String title, boolean titleTruncated) { }
     public record SearchRequest(String query, int limit, Optional<String> cursor, Optional<String> repositoryId) { }
+    public record ListRequest(Optional<String> repositoryId, int limit, Optional<String> cursor) { }
     public record ReadRequest(DocumentContext documentContext, String path, int sectionStartLine) { }
     @JsonInclude(JsonInclude.Include.NON_ABSENT)
     public record Page(int returned, boolean hasMore, Optional<String> nextCursor) { }
@@ -60,6 +61,18 @@ public final class DocumentContract {
             PublicationStatus publicationStatus, Optional<DocumentFailure.Code> publicationErrorCode,
             List<SearchHit> items, Page page) {
         public SearchResult { items = List.copyOf(items); }
+    }
+    @JsonInclude(JsonInclude.Include.NON_ABSENT)
+    public record DocumentListItem(DocumentContext documentContext, String path, String contentDigest,
+            int byteLength, Section section, SourceContext primaryContext, List<SourceContext> relatedContexts,
+            ReviewStatus reviewStatus, Optional<String> reviewReference) {
+        public DocumentListItem { relatedContexts = List.copyOf(relatedContexts); }
+    }
+    @JsonInclude(JsonInclude.Include.NON_ABSENT)
+    public record ListResult(String documentRepositoryId, Optional<String> repositoryId,
+            CollectionPurpose collectionPurpose, Trust trust, PublicationStatus publicationStatus,
+            Optional<DocumentFailure.Code> publicationErrorCode, List<DocumentListItem> items, Page page) {
+        public ListResult { items = List.copyOf(items); }
     }
     @JsonInclude(JsonInclude.Include.NON_ABSENT)
     public record ReadResult(DocumentContext documentContext, String path, String blobId, String contentDigest,

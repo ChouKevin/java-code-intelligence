@@ -294,34 +294,4 @@ public final class SourcePathResolver {
         return Integer.compare(a.length, b.length);
     }
 
-    public static boolean matches(String path, String glob) {
-        StringBuilder regex = new StringBuilder("^");
-        for (int index = 0; index < glob.length(); index++) {
-            char character = glob.charAt(index);
-            if (character == '*') {
-                if (index + 1 < glob.length() && glob.charAt(index + 1) == '*') {
-                    regex.append(".*"); index++;
-                } else regex.append("[^/]*");
-            } else if (character == '?') regex.append("[^/]");
-            else {
-                if ("\\.[]{}()+-^$|".indexOf(character) >= 0) regex.append('\\');
-                regex.append(character);
-            }
-        }
-        return path.matches(regex.append('$').toString());
-    }
-
-    public static String safeGlob(String glob) {
-        safeFile(glob);
-        int wildcards = 0;
-        for (int index = 0; index < glob.length(); index++) {
-            if (glob.charAt(index) == '*' || glob.charAt(index) == '?') wildcards++;
-        }
-        if (glob.length() > 256 || wildcards > 8 || glob.contains("***") || glob.charAt(0) == '!'
-                || glob.indexOf('[') >= 0 || glob.indexOf(']') >= 0
-                || glob.indexOf('{') >= 0 || glob.indexOf('}') >= 0 || glob.indexOf('\\') >= 0) {
-            throw new SourceQueryException(Code.INVALID_ARGUMENT);
-        }
-        return glob;
-    }
 }

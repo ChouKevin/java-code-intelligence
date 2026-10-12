@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -18,6 +19,100 @@ import org.junit.jupiter.api.io.TempDir;
 
 class RipgrepTextSearchTest {
     @TempDir Path temp;
+
+    @Test
+    void bare_and_globstar_patterns_include_root_and_nested_files() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.directory("src");
+        fixture.file("Root.java", "needle\n");
+        fixture.file("src/Nested.java", "needle\n");
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            for (String pattern : List.of("*.java", "**/*.java")) {
+                TextSearchResult result = fixture.service().searchText(admitted,
+                        new TextSearchRequest(fixture.context, "needle", "", Optional.of(pattern), 20));
+                assertThat(result.matches()).extracting(TextMatch::path)
+                        .containsExactlyInAnyOrder("Root.java", "src/Nested.java");
+            }
+        }
+    }
+
+    @Test
+    void unicodeAndNestedAlternativesCannotBeLostByNativePruning() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.directory("src");
+        fixture.directory("src/deep");
+        List<String> paths = List.of("A.java", "é.java", "😀.java", "a?.java", "[x].java", "!bang.java",
+                "a,b.java", "ab.java", "pom.xml", "src/A.java", "src/é.java", "src/😀.java",
+                "src/deep/B.java", "src/pom.xml", "-.range", "..range", "0.range", "1.range");
+        for (String path : paths) fixture.file(path, "needle\n");
+        fixture.publish(Optional.empty());
+        Map<String, List<String>> selections = Map.ofEntries(
+                Map.entry("?.java", List.of("A.java", "é.java", "😀.java", "src/A.java", "src/é.java", "src/😀.java", "src/deep/B.java")),
+                Map.entry("[é-😀].java", List.of("é.java", "😀.java", "src/é.java", "src/😀.java")),
+                Map.entry("[!A-é].java", List.of("😀.java", "src/😀.java")),
+                Map.entry("src/**/*.java", List.of("src/A.java", "src/é.java", "src/😀.java", "src/deep/B.java")),
+                Map.entry("{?.java,{src/**/*.java,pom.xml}}", List.of("A.java", "é.java", "😀.java", "src/A.java", "src/é.java", "src/😀.java", "src/deep/B.java", "pom.xml")),
+                Map.entry("{a\\,b.java,{é,😀}.java}", List.of("a,b.java", "é.java", "😀.java")),
+                Map.entry("a\\?.java", List.of("a?.java")),
+                Map.entry("\\[x\\].java", List.of("[x].java")),
+                Map.entry("\\!bang.java", List.of("!bang.java")),
+                Map.entry("[\\--0].range", List.of("-.range", "..range", "0.range")),
+                Map.entry("**/pom.xml", List.of("pom.xml", "src/pom.xml")));
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            for (Map.Entry<String, List<String>> selection : selections.entrySet()) {
+                SourceGlob.Matcher matcher = SourceGlob.compile(selection.getKey()).matcher(Long.MAX_VALUE);
+                assertThat(paths.stream().filter(matcher::matches).toList()).as(selection.getKey())
+                        .containsExactlyInAnyOrderElementsOf(selection.getValue());
+                TextSearchResult result = fixture.service().searchText(admitted,
+                        new TextSearchRequest(fixture.context, "needle", "", Optional.of(selection.getKey()), 100));
+                assertThat(result.matches()).as(selection.getKey()).extracting(TextMatch::path)
+                        .containsExactlyInAnyOrderElementsOf(selection.getValue());
+                assertThat(result.scanComplete()).isTrue();
+            }
+            for (String pattern : List.of("pom.xml", "**/pom.xml")) {
+                TextSearchResult result = fixture.service().searchText(admitted,
+                        new TextSearchRequest(fixture.context, "needle", "src", Optional.of(pattern), 20));
+                assertThat(result.matches()).extracting(TextMatch::path)
+                        .containsExactlyElementsOf(pattern.equals("pom.xml") ? List.of() : List.of("src/pom.xml"));
+            }
+        }
+    }
+
+    @Test
+    void native_projection_false_positives_do_not_consume_the_public_limit() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        for (String path : List.of("a.java", "aa.java", "aaa.java", "aaaa.java", "é.java")) fixture.file(path, "needle\n");
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            TextSearchResult result = fixture.service().searchText(admitted,
+                    new TextSearchRequest(fixture.context, "needle", "", Optional.of("[é].java"), 1));
+            assertThat(result.matches()).extracting(TextMatch::path).containsExactly("é.java");
+            assertThat(result.truncated()).isFalse();
+            assertThat(result.scanComplete()).isTrue();
+        }
+    }
+
+    @Test
+    void invalid_glob_is_rejected_before_starting_the_native_process() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("A.java", "needle\n");
+        fixture.publish(Optional.empty());
+        Path executable = temp.resolve("withdrawn-rg");
+        Files.copy(fixture.properties.rgExecutable(), executable);
+        SourceAccessProperties properties = new SourceAccessProperties(fixture.root, executable,
+                List.of("sample"), 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
+        LocalRepositorySourceService service = new LocalRepositorySourceService(properties, fixture.mapper);
+        Files.delete(executable);
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            for (String pattern : List.of("[abc", "{a}", "src/a**b", "{src,../escape}/*.java", "!*.java")) {
+                assertThatThrownBy(() -> service.searchText(admitted,
+                        new TextSearchRequest(fixture.context, "needle", "", Optional.of(pattern), 20)))
+                        .isInstanceOfSatisfying(SourceQueryException.class,
+                                exception -> assertThat(exception.code()).isEqualTo(SourceQueryException.Code.INVALID_ARGUMENT));
+            }
+        }
+    }
 
     @Test
     void real_literal_search_has_unicode_utf16_columns_global_limit_and_guide_hint() throws Exception {

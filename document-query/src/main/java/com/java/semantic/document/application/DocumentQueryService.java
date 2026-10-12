@@ -5,6 +5,9 @@ import com.java.semantic.document.application.DocumentContract.DocumentContext;
 import com.java.semantic.document.application.DocumentContract.Page;
 import com.java.semantic.document.application.DocumentContract.ReadRequest;
 import com.java.semantic.document.application.DocumentContract.ReadResult;
+import com.java.semantic.document.application.DocumentContract.DocumentListItem;
+import com.java.semantic.document.application.DocumentContract.ListRequest;
+import com.java.semantic.document.application.DocumentContract.ListResult;
 import com.java.semantic.document.application.DocumentContract.SearchHit;
 import com.java.semantic.document.application.DocumentContract.SearchRequest;
 import com.java.semantic.document.application.DocumentContract.SearchResult;
@@ -18,8 +21,10 @@ import com.java.semantic.document.catalog.MarkdownSections.Span;
 import com.java.semantic.model.repository.RepositoryId;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -47,7 +52,9 @@ public final class DocumentQueryService {
             DocumentCursorCodec.Cursor continuation = request.cursor().isPresent()
                     ? cursors.decode(request.cursor().orElseThrow()) : null;
             if (Objects.nonNull(continuation)
-                    && (!continuation.query().equals(request.query()) || continuation.limit() != request.limit()
+                    && (continuation.operation() != DocumentCursorCodec.Operation.SEARCH
+                            || !continuation.query().equals(Optional.of(request.query()))
+                            || continuation.limit() != request.limit()
                             || !continuation.repositoryId().equals(request.repositoryId()))) {
                 throw invalid();
             }
@@ -64,7 +71,7 @@ public final class DocumentQueryService {
                 Map<String, Document> documents = request.repositoryId().isEmpty() ? view.documents()
                         : Objects.isNull(scoped) ? Map.of() : scoped.documents();
                 Position after = Objects.isNull(continuation) ? null
-                        : new Position(continuation.path(), continuation.sectionStartLine());
+                        : new Position(continuation.path(), continuation.sectionStartLine().orElseThrow());
                 List<SearchHit> candidates = collectCandidates(view, documents, request.query(), view.collectionPurpose(),
                         after, request.limit(), deadline);
                 int returned = Math.min(request.limit(), candidates.size());
@@ -73,13 +80,72 @@ public final class DocumentQueryService {
                     deadline.check();
                     boolean hasMore = candidates.size() > returned;
                     Optional<String> nextCursor = hasMore
-                            ? Optional.of(cursors.encode(new DocumentCursorCodec.Cursor(request.repositoryId(), version,
-                                    request.query(), request.limit(), candidates.get(returned).path(),
-                                    candidates.get(returned).section().startLine())))
+                            ? Optional.of(cursors.encode(new DocumentCursorCodec.Cursor(DocumentCursorCodec.Operation.SEARCH,
+                                    request.repositoryId(), version, Optional.of(request.query()), request.limit(),
+                                    candidates.get(returned).path(), Optional.of(candidates.get(returned).section().startLine()))))
                             : Optional.empty();
                     SearchResult result = new SearchResult(view.documentRepositoryId(), request.repositoryId(), view.collectionPurpose(), Trust.NOT_VERIFIED,
                             view.publicationStatus(), view.publicationErrorCode(), candidates.subList(0, returned),
                             new Page(returned, hasMore, nextCursor));
+                    try {
+                        T materialized = materialize.apply(result);
+                        deadline.check();
+                        return materialized;
+                    } catch (DocumentFailure failure) {
+                        deadline.check();
+                        if (failure.code() != DocumentFailure.Code.DOCUMENT_RESULT_TOO_LARGE || returned <= 1) {
+                            throw failure;
+                        }
+                        returned--;
+                    }
+                }
+            }
+        }
+    }
+
+    public <T> T list(ListRequest request, Function<ListResult, T> materialize) {
+        validateList(request, materialize);
+        try (DocumentOperationGate.Permit permit = operations.open()) {
+            DocumentDeadline deadline = permit.deadline();
+            deadline.check();
+            DocumentCursorCodec.Cursor continuation = request.cursor().isPresent()
+                    ? cursors.decode(request.cursor().orElseThrow()) : null;
+            if (Objects.nonNull(continuation)
+                    && (continuation.operation() != DocumentCursorCodec.Operation.LIST
+                            || continuation.limit() != request.limit()
+                            || !continuation.repositoryId().equals(request.repositoryId()))) {
+                throw invalid();
+            }
+
+            try (ReadLease lease = catalog.open(deadline)) {
+                deadline.check();
+                CatalogView view = lease.view();
+                RepositorySnapshot scoped = request.repositoryId().map(view.repositories()::get).orElse(null);
+                String version = request.repositoryId().isEmpty() ? view.globalVersion()
+                        : Objects.isNull(scoped) ? "" : scoped.context().documentRevision();
+                if (Objects.nonNull(continuation) && !continuation.version().equals(version)) {
+                    throw new DocumentFailure(DocumentFailure.Code.DOCUMENT_REVISION_NOT_AVAILABLE);
+                }
+                NavigableMap<String, Document> documents = request.repositoryId().isEmpty() ? view.documents()
+                        : Objects.isNull(scoped) ? Collections.emptyNavigableMap() : scoped.documents();
+                if (Objects.nonNull(continuation) && !documents.containsKey(continuation.path())) {
+                    throw invalid();
+                }
+                String afterPath = Objects.isNull(continuation) ? null : continuation.path();
+                List<DocumentListItem> candidates = collectListItems(view, documents, afterPath, request.limit(), deadline);
+                int returned = Math.min(request.limit(), candidates.size());
+
+                while (true) {
+                    deadline.check();
+                    boolean hasMore = candidates.size() > returned;
+                    Optional<String> nextCursor = hasMore
+                            ? Optional.of(cursors.encode(new DocumentCursorCodec.Cursor(DocumentCursorCodec.Operation.LIST,
+                                    request.repositoryId(), version, Optional.empty(), request.limit(),
+                                    candidates.get(returned).path(), Optional.empty())))
+                            : Optional.empty();
+                    ListResult result = new ListResult(view.documentRepositoryId(), request.repositoryId(),
+                            view.collectionPurpose(), Trust.NOT_VERIFIED, view.publicationStatus(),
+                            view.publicationErrorCode(), candidates.subList(0, returned), new Page(returned, hasMore, nextCursor));
                     try {
                         T materialized = materialize.apply(result);
                         deadline.check();
@@ -129,6 +195,27 @@ public final class DocumentQueryService {
                 return materialized;
             }
         }
+    }
+
+    private static List<DocumentListItem> collectListItems(CatalogView view, NavigableMap<String, Document> documents,
+            String afterPath, int limit, DocumentDeadline deadline) {
+        List<DocumentListItem> items = new ArrayList<>(limit + 1);
+        for (Map.Entry<String, Document> entry : documents.entrySet()) {
+            deadline.check();
+            String path = entry.getKey();
+            if (Objects.nonNull(afterPath) && path.compareTo(afterPath) < 0) {
+                continue;
+            }
+            Document document = entry.getValue();
+            RepositorySnapshot owner = view.repositories().get(document.primaryContext().repositoryId());
+            items.add(new DocumentListItem(owner.context(), path, document.contentDigest(), document.byteLength(),
+                    document.sections().getFirst().section(), document.primaryContext(), document.relatedContexts(),
+                    document.reviewStatus(), document.reviewReference()));
+            if (items.size() == limit + 1) {
+                return items;
+            }
+        }
+        return items;
     }
 
     private static List<SearchHit> collectCandidates(CatalogView view, Map<String, Document> documents, String query,
@@ -198,6 +285,23 @@ public final class DocumentQueryService {
         if (queryCodePoints < 1 || queryCodePoints > DocumentContract.MAX_QUERY_CODE_POINTS || query.isBlank()) {
             throw invalid();
         }
+        if (request.cursor().isPresent()) {
+            String cursor = request.cursor().orElseThrow();
+            if (cursor.length() > DocumentContract.MAX_CURSOR_BYTES
+                    || cursor.getBytes(StandardCharsets.UTF_8).length > DocumentContract.MAX_CURSOR_BYTES) {
+                throw invalid();
+            }
+        }
+    }
+
+    private static void validateList(ListRequest request, Function<ListResult, ?> materialize) {
+        if (Objects.isNull(request) || Objects.isNull(materialize) || Objects.isNull(request.cursor())
+                || Objects.isNull(request.repositoryId()) || request.limit() < 1
+                || request.limit() > DocumentContract.MAX_LIMIT) {
+            throw invalid();
+        }
+        try { request.repositoryId().ifPresent(RepositoryId::new); }
+        catch (IllegalArgumentException exception) { throw invalid(); }
         if (request.cursor().isPresent()) {
             String cursor = request.cursor().orElseThrow();
             if (cursor.length() > DocumentContract.MAX_CURSOR_BYTES

@@ -7,47 +7,61 @@ Docker, publication or Git integration. Native success is not external-agent pro
 
 ## Current verification status
 
-Current evidence is recorded below. The historical table is limited to its earlier code/runtime and does not establish the new per-owner contract.
+Source/Document discovery has fresh ordinary and packaged-process evidence:
 
-Integration verification ran a fresh full-reactor `clean package`: 401 tests,
-400 passed, one ACL-view platform skip, zero failures/errors. Module counts:
-Model 9, Indexer 172, Source Query 139, Document Query 81.
-Packaged Document CLI/MCP journeys passed all three scenarios with zero skips,
-including real unprivileged publication-failure recovery. Source/Relations
-packaged journeys and external-agent evidence were not rerun by this integration
-gate; their separately recorded proof remains limited to its original scope.
+| Gate | Actual result |
+| --- | --- |
+| Full reactor `clean package` | 433 tests: 432 passed, one existing ACL-view platform skip, zero failures/errors. Model9, Indexer172, Source Query165, Document Query87. |
+| Packaged Source/Relations | Two scenarios passed, zero skips, including filename discovery, HTTP/MCP parity, Unicode paths, retained exact-context pagination, expiry and Query after Indexer stops. |
+| Packaged Document/local publication | Three scenarios passed, zero skips, including metadata browsing, global/owner cursor boundaries, actual MCP reads and unprivileged publication-failure recovery. |
+| Image smoke script | Shell syntax check passed; image execution is not authorized or claimed. |
 
-The first integrated Document run had one incidental race-test error-code
-assertion defect. That assertion was removed; subsequent operation-identity,
-HEAD/branch, safe-removal and first-publication cutover repairs passed the final
-ordinary run. A backing-host capacity pause deferred their pre-fix execution;
-the later successful run is not retroactive RED evidence. Verification resumed
-only after headroom recovered, without changing unrelated services or global limits.
+The first packaged Source run failed during preparation because its isolated
+launcher removed the locale: Java21 used ASCII native filename encoding for the
+new Unicode fixture paths. A disposable path probe reproduced the failure and
+verified `LANG=C.UTF-8`; the launcher now sets that locale while retaining its
+cleared environment. The corrected journeys passed without removing the Unicode
+cases or changing production behavior. Ordinary and packaged runs used one serial
+lane with bounded JVM heaps; a prior capacity pause deferred execution, not an OOM
+test failure. Native Source processes require a UTF-8 filesystem locale, not merely
+`file.encoding=UTF-8`.
 
-Fresh Query-only dual-MCP acceptance used Codex CLI 0.162.1 with explicit
-`--model gpt-6-luna`, isolated read credentials, complete unedited traces/answers,
-and exact source/document locator and claim-support audits. Provider model
-identity was not independently reported. Four scenarios used six invocations:
+Fresh Query-only acceptance used Codex CLI0.162.1 with explicit
+`--model gpt-6-luna`, independent Source/Document read credentials, an empty client
+workspace and disabled local-source/shell/authoring tools. Indexer was stopped
+before querying. Complete unedited traces/answers, actual executable digests and
+source/document locator plus claim-support audits are retained privately.
+Provider model identity was not independently reported.
 
-| Current scenario | Result | MCP calls | Demonstrated boundary |
+| Discovery scenario | Result | MCP calls | Demonstrated boundary |
 | --- | --- | --- | --- |
-| Neutral business navigation | PASS | 21 | Full document navigation, complete unfiltered repository discovery and raw source evidence |
-| A update, stale global/A lookups, unchanged B | PASS_WITH_RECOVERY | 59 | Induced stale errors recovered; original B context/cursor remained valid; Document/Source busy errors were explicitly recovered |
-| Neutral question after genuine source rollback | PASS_WITH_RECOVERY | 28 | Forward document commit, unchanged B, fixed source pins; an out-of-range package citation was explicitly withdrawn and replaced for the same claim |
-| Last A document removed | PASS | 19 | Empty document search led to source evidence, not a claim that the feature disappeared |
+| Neutral current-project overview | PASS_WITH_RECOVERY | 17 | Metadata browsing and filename discovery without an index; a rejected Document limit100 was corrected to its bounded default; build/module claims cite actual descriptors |
+| Explicit retained Source A with latest B-derived document | PASS | 19 | Only A source was read; raw policy ranges and the complete latest document establish the difference without retargeting to B |
+| Related-repository question and empty-document fallback | PASS_WITH_RECOVERY | 30 + 15 | After actual fixture-document withdrawal, empty Document search led to independently pinned Source reads; an unsupported external-API semantic claim was explicitly withdrawn and replaced for the same claim |
+| Directory-scoped build discovery/text search | PASS_WITH_RECOVERY | 7 | Root-exact literal alternatives produced empty scoped selections; bounded discovery returned the actual repository-relative descriptor path, then scoped text search and raw read supported the dependency citation without reading another module |
 
-The operator also removed the final B document: global/scoped document searches
-succeeded empty while both source policies remained readable. Unrelated working
-bytes and Git history were preserved. Author handoffs remained TEST_ONLY/DRAFT/
-NOT_VERIFIED and required recorded provenance, wording and locator corrections;
-author results are not substitutes for the separate Query runs. Original failures
-and corrections remain private evidence, not retroactively clean passes.
+These are five final-scenario invocations, not a model reliability guarantee.
+The initial current-project answer omitted build-descriptor citations and was
+rejected; the skill now puts evidence in each overview row. A fresh answer does
+not retroactively repair that earlier answer. The original relationship answer
+also guessed a missing path before recovering discovery; its later explicit
+semantic correction is preserved with the original answer. The initial client
+setup disabled Codex's required MCP tool host and made no MCP calls; it is setup
+failure, not a skill baseline. A subsequent old-skill characterization worked
+through the former search/directory route before the skill changes.
 
-Scoped and whole-branch static review findings were resolved. These local results
-do not constitute deployment approval, model-wide reliability or production sizing.
+Whole-branch review found one guidance defect: the skill incorrectly rebased glob
+patterns to `directory`. The clause now states repository-relative matching and
+the existing non-rebasing counterexample; the focused scoped-query run above
+exercises it. Runtime implementation was already correct and remains unchanged.
+Whole-branch review and scoped fix re-review are complete, with no unresolved findings.
+
+These local results do not constitute deployment approval, model-wide reliability
+or production sizing.
 
 | Historical evidence boundary | Recorded baseline result (scope limited to its original code, inputs and runtime) |
 | --- | --- |
+| Previous latest-document milestone | Fresh ordinary401:400 passed,one ACL-view skip; packaged Document/local-publication3 passed. Independent explicit-Luna dual-MCP normal navigation and missing-document fallback passed; stale-owner recovery and source-rollback/document-update cases passed with recorded recovery. Four scenarios used six invocations. This predates filename/document discovery and does not accept the new tools. |
 | Historical merged-main clean full reactor | `clean package`: 374 tests, 373 passed, zero failures/errors, one skipped because this Linux filesystem exposes no JDK ACL view. Model: 9; Indexer: 172; Source Query: 139; Document Query: 54. This predates latest-document-navigation. |
 | Historical packaged native Document/local-publication proof | Three former-contract scenarios passed, zero skips: actual CLI/MCP, prior exact pins, rollback, refusal, withdrawal, and commit-success/selection-failure recovery. The POSIX permission fault used an unprivileged runner. Not evidence for format-2 owner maps, owner-scoped cursors, final-file removal, or new recovery semantics. |
 | Historical packaged native Source/Relations proof | Two scenarios passed, zero skips, on the selected unchanged source runtime. Source retention/historical behavior remains a separate contract. |
@@ -268,8 +282,9 @@ Query with Indexer stopped. It does not prove runtime dispatch, Kafka/Rabbit
 approved-artifact interpretation or minimum superseded-generation TTL.
 
 Image smoke checks actual packaged JavaParser/Symbol Solver 3.28.2 and SQLite
-3.53.4.0, nine Source Query/three Indexer tools, child-built profile-3 generations,
-private JNI, retained/rebuilt A/B and source independence under native failure.
+3.53.4.0, Source Query and private Indexer capabilities, child-built profile-3
+generations, filename discovery HTTP/MCP parity, private JNI, retained/rebuilt A/B
+and source independence under native failure.
 Its JDK test peer takes a shared lock as UID 10002 on the read-only mount: this is
 OS/UID/mount proof, not an in-flight HTTP request. Only the disposable image
 fixture shortens the retention retry interval to `1s`; production default is `24h`.

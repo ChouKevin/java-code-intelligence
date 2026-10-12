@@ -11,7 +11,6 @@ import com.java.semantic.api.QuerySecurityProperties;
 import com.java.semantic.api.QueryTokenFilter;
 import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
-import com.java.semantic.mcp.SemanticMcpToolCatalog;
 import com.java.semantic.model.source.SourceReadContract.ContextRequest;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.server.McpServerFeatures;
@@ -30,6 +29,30 @@ class HttpMcpParityTest {
     @TempDir Path temp;
 
     @Test
+    void filename_discovery_returns_matching_paths_without_a_content_query() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.directory("src");
+        fixture.file("Root.java", "root\n");
+        fixture.file("src/Nested.java", "nested\n");
+        fixture.publish(Optional.empty());
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(), fixture.index,
+                fixture.properties.maxActiveSearches());
+        MockMvc http = standaloneSetup(new SemanticQueryController(facade))
+                .setControllerAdvice(new QueryApiExceptionHandler())
+                .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper)).build();
+        Map<String, Object> request = Map.of("context", fixture.context, "filePattern", "*.java");
+        String body = http.perform(post("/api/v1/find-files").contentType("application/json")
+                        .content(fixture.mapper.writeValueAsBytes(request)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        JsonNode result = fixture.mapper.readTree(body);
+        assertThat(result.path("context").path("revision").stringValue()).isEqualTo(SourceFilesystemFixture.SHA);
+        assertThat(result.path("items").size()).isEqualTo(2);
+        assertThat(result.path("items").get(0).path("path").stringValue()).isEqualTo("Root.java");
+        assertThat(result.path("items").get(1).path("path").stringValue()).isEqualTo("src/Nested.java");
+        assertThat(result.path("page").path("hasMore").asBoolean()).isFalse();
+    }
+
+    @Test
     void source_and_index_operations_share_transport_results_and_safe_failure_categories() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.directory("src");
@@ -44,13 +67,16 @@ class HttpMcpParityTest {
                 .addFilters(new QueryTokenFilter(security)).build();
         List<McpServerFeatures.SyncToolSpecification> tools = new QueryMcpToolCatalogConfiguration()
                 .mcpQueryToolSpecifications(facade, fixture.mapper);
-        assertThat(SemanticMcpToolCatalog.tools()).extracting(SemanticMcpToolCatalog.ToolDefinition::name)
-                .containsExactly("list_repositories", "get_context", "list_files", "search_text", "read_source",
-                        "search_code", "get_outline", "list_entry_points", "find_relations");
         Map<String, Object> context = Map.of("repositoryId", "sample", "revision", SourceFilesystemFixture.SHA);
         assertParity(http, tools, fixture.mapper, "list_repositories", "/api/v1/repositories", Map.of(), false, 200, null);
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context", Map.of("repositoryId", "sample"), false, 200, null);
         assertParity(http, tools, fixture.mapper, "list_files", "/api/v1/files", Map.of("context", context), false, 200, null);
+        assertParity(http, tools, fixture.mapper, "find_files", "/api/v1/find-files",
+                Map.of("context", context, "filePattern", "*.java"), false, 200, null);
+        assertParity(http, tools, fixture.mapper, "find_files", "/api/v1/find-files",
+                Map.of("context", context, "filePattern", "src/[broken"), true, 400, "INVALID_ARGUMENT");
+        assertParity(http, tools, fixture.mapper, "find_files", "/api/v1/find-files",
+                Map.of("context", context, "filePattern", "**", "directory", "missing"), true, 404, "SOURCE_NOT_FOUND");
         assertParity(http, tools, fixture.mapper, "search_text", "/api/v1/search-text",
                 Map.of("context", context, "query", "Order"), false, 200, null);
         assertParity(http, tools, fixture.mapper, "read_source", "/api/v1/source",

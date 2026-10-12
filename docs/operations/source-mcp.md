@@ -497,6 +497,7 @@ GET /api/v1/repositories
 POST /api/v1/context                 {"repositoryId":"video"}
 POST /api/v1/context                 {"repositoryId":"video","revision":"d366278ff697b2ac7d0510830a840a475ec31794"}
 POST /api/v1/files                   {"context":{"repositoryId":"video","revision":"d366278ff697b2ac7d0510830a840a475ec31794"},"directory":""}
+POST /api/v1/find-files              {"context":{"repositoryId":"video","revision":"d366278ff697b2ac7d0510830a840a475ec31794"},"filePattern":"**/pom.xml"}
 POST /api/v1/search-text             {"context":{"repositoryId":"video","revision":"d366278ff697b2ac7d0510830a840a475ec31794"},"query":"upload"}
 POST /api/v1/source                  {"context":{"repositoryId":"video","revision":"d366278ff697b2ac7d0510830a840a475ec31794"},"path":"src/main/java/com/example/video/VideoController.java"}
 ```
@@ -542,9 +543,68 @@ parity remains, although pagination boundaries can change with the wire budget.
 Numbering lowers citation-location effort but does not prove an agent copied a
 path correctly or that an attached passage supports its claim.
 
-`search_text` remains single-line, literal, case-sensitive (maximum 256 Unicode code points), with optional narrowing `directory`/`filePattern`; it has no regex or continuation cursor. If `truncated=true`/`scanComplete=false`, narrow the query/path and do not claim absence. It shares at most two concurrent permits and a 5s deadline; list/read keep their 2s deadline. Search columns are one-based UTF-16 code units.
+### File discovery and shared glob policy
 
-`filePattern` matches repository-relative paths; `directory` narrows that same scope and does not rebase the glob. For example, directory `src` with pattern `src/*.java` searches Java files directly under `src`. Line coordinates count original LF bytes: LF belongs to the line it ends, a final LF creates no fictitious line, an empty file has no content lines, and final bytes without LF are still one line. A selector beyond EOF yields an empty effective selection with no fabricated citation span; `tailLines` selects the last N existing lines (or the whole file when shorter).
+`find_files` requires exact `context` and `filePattern`; optional `directory`
+defaults to the root, `limit` defaults to20 (maximum100), and `cursor` continues
+the same request. It returns `context`, `items` and `page`, with one FILE inventory
+row `{path,status,byteLength,navigationHint}` at any depth, no directories or
+source bodies. A listed BINARY/SYMLINK/SUBMODULE/other unsupported status does not
+grant raw readability; links are never followed. Use `list_files` for directory
+previews and `read_source` with the returned literal path for content.
+
+Discovery uses unsigned UTF-8 inventory path order, not mtime or rg traversal.
+Full inventory integrity is checked before success, even when the page is full.
+Pages obey the512KiB complete HTTP/MCP budget and may end before the requested
+limit; one complete row that cannot fit fails `SOURCE_RESULT_TOO_LARGE`.
+The cursor binds the operation, glob policy, exact source/manifest, original
+pattern, directory and requested limit. Keep all of them unchanged. Advancing
+current does not retarget a retained pin; missing/expired source fails explicitly.
+Tampered, cross-operation or changed-filter cursors return `INVALID_ARGUMENT`.
+Cursors are process-authenticated, not durable bookmarks.
+
+`search_text` remains single-line, literal, case-sensitive (maximum 256 Unicode code points), with optional narrowing `directory`/`filePattern`; it has no regex or continuation cursor. If `truncated=true`/`scanComplete=false`, narrow the query/path and do not claim absence. `find_files`, `search_text` and index searches share at most two concurrent permits and a5s application deadline; directory list/read keep their2s deadline. Search columns are one-based UTF-16 code units.
+
+Both filePattern inputs use the same case-sensitive, non-normalizing Unicode-scalar glob policy. Patterns are repository-relative; `directory` narrows without rebasing. A literal `pom.xml` is root-exact; a bare wildcard such as `*.java` recursively matches basenames. This replaces the older conflicting native/Java filtering semantics, not the literal content-query contract.
+
+| Pattern | Matching scope |
+| --- | --- |
+| `pom.xml` | Root pom.xml only |
+| `**/pom.xml` | Root and descendant pom.xml files |
+| `*.java` or `**/*.java` | Root and descendant Java filenames |
+| `src/*.java` | Direct files under root-relative src |
+| `src/**/*.java` | Direct and deeper files under src |
+| `?`, `[abc]`, `[a-z]`, `[!a-z]` | One non-separator Unicode scalar; set, range or complement |
+| `**/{pom.xml,{build.gradle,settings.gradle}}` | Nested positive alternatives at any depth |
+| `a\?.java` | Exact root file whose name contains a literal question mark; JSON uses `"a\\?.java"` |
+
+`*` consumes zero or more non-separator scalars. `**` must occupy a whole
+component; `**/` allows zero directories and terminal `/**` selects descendants.
+Normalize bare wildcard branches after brace expansion; literal branches stay
+root-exact, so `{pom.xml,build.gradle}` does not search descendant basenames.
+Within a class, leading `!` negates, `^` is literal, and `-` denotes a scalar
+range between endpoints or is literal at an edge. Escaped class metacharacters
+are literal. Backslash escapes glob metacharacters, not Windows separators;
+literal backslashes cannot name canonical Source paths. Spaces/semicolons are
+literal characters, not a list of roots or targets.
+
+Patterns are nonblank and at most256 Unicode scalars, with at most4 nested brace
+levels,64 expanded alternatives,8192 total compiled matcher states and65536
+UTF-8 bytes of generated native pruning arguments. Invalid Unicode/controls,
+absolute/drive/URL paths, empty/dot/traversal components, trailing separators,
+negated whole patterns, extglob/POSIX classes/number expansion, empty or single
+brace alternatives, descending ranges, embedded `**`, `***`, malformed delimiters
+and invalid escapes fail `INVALID_ARGUMENT`. There is no typo repair or silent
+literal fallback. A valid pattern with no admitted matches succeeds empty.
+
+The shared matcher is authoritative; rg gets compiler-generated conservative
+pruning only, including Unicode-safe widening. Projection false positives do
+not consume the public match limit. Exclusions and published membership still
+apply. For example, directory `src` with `src/*.java` selects its direct files,
+whereas directory `src` with literal `pom.xml` does not rebase to src/pom.xml.
+Read-source path suffix selectors are not glob syntax or interpreted locators.
+
+Line coordinates count original LF bytes: LF belongs to the line it ends, a final LF creates no fictitious line, an empty file has no content lines, and final bytes without LF are still one line. A selector beyond EOF yields an empty effective selection with no fabricated citation span; `tailLines` selects the last N existing lines (or the whole file when shorter).
 
 Search uses ripgrep's path-sorted directory traversal so the bounded result window and HTTP/MCP order do not depend on worker scheduling. Each search checks complete inventory digest/order once using one read-only file handle; bounded positional lookups on that verified handle validate candidate windows without retaining a whole-repository index. Each unique authorized file is hashed once, and untracked physical hits cannot consume the authorized result limit or cause a false complete scan. Directory traversal order is not global lexicographic file-path order (for example, `a/z.java` can precede `a.java` in rg output); preserve the actual rg prefix. The two-search concurrency limit and original 5s wall deadline still apply; there is no heap sort or search continuation.
 
@@ -693,7 +753,7 @@ Pages default to 20, maximum 100. Common result UTF-8 JSON is at most 163,840 by
 HTTP body/MCP CallToolResult JSON at most 524,288 bytes (excluding protocol
 envelope/framing). Emit complete rows only: a byte-limited page continues after
 its last emitted row; first-row/metadata overflow gives INDEX_RESULT_TOO_LARGE,
-never silently skips an oversized row. `search_text` and all four index tools share
+never silently skips an oversized row. `find_files`, `search_text` and all four index tools share
 at most two permits. Five-second index deadlines include source/index admission,
 digest, SQL and materialization; permits/guards outlive actual cleanup.
 Parent provenance validation uses an internal projection without the parent's

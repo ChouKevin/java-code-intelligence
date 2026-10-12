@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -45,11 +46,12 @@ public final class RipgrepTextSearch {
     public TextSearchResult search(AdmittedSourceRevision admitted, TextSearchRequest request) {
         if (!admitted.context().equals(request.context())) throw new SourceQueryException(Code.INVALID_ARGUMENT);
         String directory = SourcePathResolver.safeDirectory(request.directory());
-        String glob = request.filePattern().map(SourcePathResolver::safeGlob).orElse("");
+        Optional<SourceGlob> glob = request.filePattern().map(SourceGlob::compile);
         return run(admitted, request, directory, glob);
     }
 
-    private TextSearchResult run(AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob) {
+    private TextSearchResult run(AdmittedSourceRevision admitted, TextSearchRequest request, String directory,
+            Optional<SourceGlob> glob) {
         long operationDeadline = SourceOperationDeadline.cap(
                 LocalSourceRevisionCatalog.deadline(properties.searchTimeout()));
         long remaining = Math.max(0, operationDeadline - System.nanoTime());
@@ -73,12 +75,16 @@ public final class RipgrepTextSearch {
     }
 
     private TextSearchResult runVerified(AdmittedSourceRevision admitted, TextSearchRequest request,
-            String directory, String glob, long deadline, long operationDeadline,
+            String directory, Optional<SourceGlob> glob, long deadline, long operationDeadline,
             SourcePathResolver.InventoryLookup inventory) {
         List<String> command = new ArrayList<>(List.of(properties.rgExecutable().toString(), "--no-config", "--json",
                 "--fixed-strings", "--case-sensitive", "--line-number", "--hidden", "--no-ignore", "--no-messages",
                 "--sort", "path", "--encoding", "none"));
-        if (!glob.isEmpty()) { command.add("--glob"); command.add(glob); }
+        glob.ifPresent(compiled -> {
+            for (String nativeGlob : compiled.nativeGlobs()) {
+                command.add("--glob"); command.add(nativeGlob);
+            }
+        });
         command.addAll(List.of("--glob", "!.git/**", "--glob", "!target/**", "--glob", "!build/**",
                 "--glob", "!.gradle/**", "--glob", "!node_modules/**", "--glob", "!generated/**",
                 "--glob", "!*.class"));
@@ -250,9 +256,10 @@ public final class RipgrepTextSearch {
     }
 
     private void readMatches(InputStream stream, Process process, AtomicBoolean stopping,
-            AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob,
+            AdmittedSourceRevision admitted, TextSearchRequest request, String directory, Optional<SourceGlob> glob,
             long deadline, List<TextMatch> matches, AtomicBoolean enough,
             SourcePathResolver.InventoryLookup inventory) throws IOException {
+        Optional<SourceGlob.Matcher> matcher = glob.map(compiled -> compiled.matcher(deadline));
         ByteArrayOutputStream frame = new ByteArrayOutputStream();
         List<JsonNode> candidates = new ArrayList<>();
         Set<String> verified = new HashSet<>();
@@ -271,7 +278,7 @@ public final class RipgrepTextSearch {
                     if (frame.size() >= FRAME_CAP) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
                     frame.write(value);
                 } else {
-                    JsonNode event = candidate(frame.toByteArray(), directory, glob);
+                    JsonNode event = candidate(frame.toByteArray(), directory, matcher);
                     if (Objects.nonNull(event)) candidates.add(event);
                     frame.reset();
                     if (candidates.size() >= window) {
@@ -288,7 +295,7 @@ public final class RipgrepTextSearch {
         }
     }
 
-    private JsonNode candidate(byte[] frame, String directory, String glob) {
+    private JsonNode candidate(byte[] frame, String directory, Optional<SourceGlob.Matcher> matcher) {
         try {
             JsonNode event = mapper.readTree(frame);
             if (!"match".equals(event.path("type").asString())) return null;
@@ -297,7 +304,7 @@ public final class RipgrepTextSearch {
             if (!directory.isEmpty() && !path.startsWith(directory + "/")) {
                 throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
             }
-            if (!glob.isEmpty() && !SourcePathResolver.matches(path, glob)) return null;
+            if (matcher.isPresent() && !matcher.get().matches(path)) return null;
             return event;
         } catch (SourceQueryException exception) { throw exception; }
         catch (RuntimeException exception) { throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception); }

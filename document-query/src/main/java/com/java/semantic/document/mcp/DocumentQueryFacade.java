@@ -4,6 +4,7 @@ import com.java.semantic.document.application.DocumentContract;
 import com.java.semantic.document.application.DocumentContract.DocumentContext;
 import com.java.semantic.document.application.DocumentContract.ReadRequest;
 import com.java.semantic.document.application.DocumentContract.SearchRequest;
+import com.java.semantic.document.application.DocumentContract.ListRequest;
 import com.java.semantic.document.application.DocumentFailure;
 import com.java.semantic.document.application.DocumentFailure.Code;
 import com.java.semantic.document.application.DocumentQueryService;
@@ -36,6 +37,15 @@ public final class DocumentQueryFacade {
     public McpSchema.CallToolResult execute(String tool, Map<String, Object> arguments) {
         try {
             if (Objects.isNull(arguments)) { throw invalid(); }
+            if ("list_documents".equals(tool)) {
+                fields(arguments, Set.of("repositoryId", "limit", "cursor"), Set.of());
+                Optional<String> repositoryId = arguments.containsKey("repositoryId")
+                        ? Optional.of(text(arguments.get("repositoryId"))) : Optional.empty();
+                int limit = arguments.containsKey("limit") ? integer(arguments.get("limit")) : DocumentContract.DEFAULT_LIMIT;
+                Optional<String> cursor = arguments.containsKey("cursor")
+                        ? Optional.of(text(arguments.get("cursor"))) : Optional.empty();
+                return service.list(new ListRequest(repositoryId, limit, cursor), materializer::apply);
+            }
             if ("search_documents".equals(tool)) {
                 fields(arguments, Set.of("query", "limit", "cursor", "repositoryId"), Set.of("query"));
                 String query = text(arguments.get("query"));

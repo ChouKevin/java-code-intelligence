@@ -4,6 +4,8 @@ import com.java.semantic.document.application.DocumentContract.CollectionPurpose
 import com.java.semantic.document.application.DocumentContract.DocumentContext;
 import com.java.semantic.document.application.DocumentContract.ReadRequest;
 import com.java.semantic.document.application.DocumentContract.ReadResult;
+import com.java.semantic.document.application.DocumentContract.ListRequest;
+import com.java.semantic.document.application.DocumentContract.ListResult;
 import com.java.semantic.document.application.DocumentContract.SearchRequest;
 import com.java.semantic.document.application.DocumentContract.SearchResult;
 import com.java.semantic.document.catalog.DocumentCatalog;
@@ -102,6 +104,75 @@ class DocumentOperationLifecycleTest {
     }
 
     @Test
+    void blockedListsHoldPermitsAndCatalogLeasesThroughCancellationAndPublicationReload() throws Exception {
+        String original = "# Old guide\nold listing metadata";
+        String replacement = "# New guide\nupdated listing metadata";
+        try (DocumentFixture fixture = new DocumentFixture(root.resolve("list-lifecycle"))) {
+            String firstRevision = fixture.commit(Map.of(DocumentFixture.GUIDE, original));
+            fixture.publish(Map.of("sample", firstRevision));
+            DocumentQueryProperties properties = fixture.properties(CollectionPurpose.TEST_ONLY);
+            DocumentResultWriter writer = new DocumentResultWriter(fixture.mapper);
+            try (GitDocumentLoader loader = new GitDocumentLoader(properties.storage(), writer);
+                    ExecutorService executor = Executors.newFixedThreadPool(3)) {
+                DocumentCatalog catalog = new DocumentCatalog(properties.storage(), loader);
+                DocumentQueryService service = new DocumentQueryService(catalog,
+                        new DocumentCursorCodec(fixture.mapper), new DocumentOperationGate());
+                ListRequest request = new ListRequest(Optional.empty(), 10, Optional.empty());
+                CountDownLatch listsEntered = new CountDownLatch(2);
+                CountDownLatch firstInterrupted = new CountDownLatch(1);
+                CountDownLatch releaseFirst = new CountDownLatch(1);
+                CountDownLatch releaseSecond = new CountDownLatch(1);
+                CountDownLatch firstUnwound = new CountDownLatch(1);
+                CountDownLatch secondUnwound = new CountDownLatch(1);
+                AtomicReference<DocumentFailure.Code> firstFailure = new AtomicReference<>();
+                AtomicReference<DocumentFailure.Code> secondFailure = new AtomicReference<>();
+                AtomicReference<Thread> reloadThread = new AtomicReference<>();
+                CountDownLatch reloadStarted = new CountDownLatch(1);
+
+                try {
+                    Future<ListResult> cancelledList = blockedList(executor, service, request, listsEntered,
+                            releaseFirst, firstInterrupted, firstUnwound, firstFailure);
+                    Future<ListResult> retainedList = blockedList(executor, service, request, listsEntered,
+                            releaseSecond, new CountDownLatch(1), secondUnwound, secondFailure);
+                    assertThat(listsEntered.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertBusyList(service, request);
+
+                    assertThat(cancelledList.cancel(true)).isTrue();
+                    assertThat(firstInterrupted.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertBusyList(service, request);
+                    releaseFirst.countDown();
+                    assertThat(firstUnwound.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertThat(firstFailure.get()).isEqualTo(DocumentFailure.Code.DOCUMENT_TIMEOUT);
+
+                    String secondRevision = fixture.commit(Map.of(DocumentFixture.GUIDE, replacement));
+                    fixture.publish(Map.of("sample", secondRevision));
+                    Future<ListResult> reloaded = executor.submit(() -> {
+                        reloadThread.set(Thread.currentThread());
+                        reloadStarted.countDown();
+                        return service.list(request, value -> value);
+                    });
+                    assertThat(reloadStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertThat(awaitTimedWaiting(reloadThread.get())).isTrue();
+                    assertBusyList(service, request);
+
+                    releaseSecond.countDown();
+                    ListResult oldResult = retainedList.get(5, TimeUnit.SECONDS);
+                    assertThat(secondUnwound.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertThat(secondFailure.get()).isNull();
+                    ListResult newResult = reloaded.get(5, TimeUnit.SECONDS);
+                    assertThat(oldResult.items().getFirst().documentContext().documentRevision()).isEqualTo(firstRevision);
+                    assertThat(newResult.items().getFirst().documentContext().documentRevision()).isEqualTo(secondRevision);
+                    assertThat(service.list(request, value -> value).items().getFirst().path())
+                            .isEqualTo(DocumentFixture.GUIDE);
+                } finally {
+                    releaseFirst.countDown();
+                    releaseSecond.countDown();
+                }
+            }
+        }
+    }
+
+    @Test
     void anExpiredDeadlineDoesNotReleaseItsPermitBeforeTheOwnerClosesIt() {
         DocumentClockFixture clock = new DocumentClockFixture();
         DocumentOperationGate operations = new DocumentOperationGate(clock::deadline);
@@ -172,5 +243,28 @@ class DocumentOperationLifecycleTest {
             TimeUnit.MILLISECONDS.sleep(1);
         }
         return false;
+    }
+    private static Future<ListResult> blockedList(ExecutorService executor, DocumentQueryService service,
+            ListRequest request, CountDownLatch entered, CountDownLatch release, CountDownLatch interrupted,
+            CountDownLatch unwound, AtomicReference<DocumentFailure.Code> failureCode) {
+        return executor.submit(() -> {
+            try {
+                return service.list(request, result -> {
+                    entered.countDown();
+                    awaitUninterruptibly(release, interrupted);
+                    return result;
+                });
+            } catch (DocumentFailure failure) {
+                failureCode.set(failure.code());
+                throw failure;
+            } finally {
+                unwound.countDown();
+            }
+        });
+    }
+
+    private static void assertBusyList(DocumentQueryService service, ListRequest request) {
+        assertThatThrownBy(() -> service.list(request, value -> value)).isInstanceOfSatisfying(DocumentFailure.class,
+                failure -> assertThat(failure.code()).isEqualTo(DocumentFailure.Code.DOCUMENT_BUSY));
     }
 }

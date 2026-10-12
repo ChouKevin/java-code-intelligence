@@ -188,6 +188,7 @@ class RelationReadBehaviorTest {
         };
         com.java.semantic.query.source.RepositorySourcePort source = new com.java.semantic.query.source.RepositorySourcePort() {
             @Override public com.java.semantic.model.source.SourceReadContract.FileCollection listFiles(AdmittedSourceRevision admitted, com.java.semantic.model.source.SourceReadContract.FileListRequest request) { throw new AssertionError("not part of relation read"); }
+            @Override public com.java.semantic.model.source.SourceReadContract.FileFindResult findFiles(AdmittedSourceRevision admitted, com.java.semantic.model.source.SourceReadContract.FileFindRequest request) { throw new AssertionError("not part of relation read"); }
             @Override public com.java.semantic.model.source.SourceReadContract.TextSearchResult searchText(AdmittedSourceRevision admitted, com.java.semantic.model.source.SourceReadContract.TextSearchRequest request) { throw new AssertionError("not part of relation read"); }
             @Override public com.java.semantic.model.source.SourceReadContract.SourceResult readSource(AdmittedSourceRevision admitted, com.java.semantic.model.source.SourceReadContract.ReadSourceRequest request, java.util.function.Function<Optional<String>, IndexContract.FoldResult> folds) { throw new AssertionError("not part of relation read"); }
         };

@@ -29,16 +29,19 @@ final class SourceFilesystemFixture {
     final Path tree;
     final Path inventory;
     final JsonMapper mapper = JsonMapper.builder().build();
-    final SourceContext context = new SourceContext("sample", SHA);
+    final SourceContext context;
     final List<SourceInventoryEntry> entries = new ArrayList<>();
     final SourceAccessProperties properties;
     final SourceReadLocks locks;
     final RepositoryIndexPort index;
     private final LocalSourceRevisionCatalog catalog;
 
-    SourceFilesystemFixture(Path temp) throws IOException {
+    SourceFilesystemFixture(Path temp) throws IOException { this(temp, SHA); }
+
+    SourceFilesystemFixture(Path temp, String revision) throws IOException {
+        context = new SourceContext("sample", revision);
         root = temp.resolve("published");
-        tree = root.resolve("sample/revisions").resolve(SHA).resolve("tree");
+        tree = root.resolve("sample/revisions").resolve(revision).resolve("tree");
         inventory = tree.getParent().resolve("inventory.jsonl");
         Files.createDirectories(tree);
         properties = new SourceAccessProperties(root, Path.of(System.getProperty("source.test.rg", "/usr/bin/rg")),
@@ -63,6 +66,12 @@ final class SourceFilesystemFixture {
         entries.add(new SourceInventoryEntry(path, EntryKind.DIRECTORY, Optional.empty(), 0, Optional.empty(), Optional.empty()));
     }
 
+    void metadata(String path, EntryStatus status, long byteLength) {
+        entries.add(new SourceInventoryEntry(path, EntryKind.FILE, Optional.of(status), byteLength,
+                status == EntryStatus.TEXT ? Optional.of(SHA) : Optional.empty(),
+                status == EntryStatus.TEXT ? Optional.of(LocalSourceRevisionCatalog.digest(new byte[0])) : Optional.empty()));
+    }
+
     void publish(Optional<String> guide) throws IOException {
         entries.sort((left, right) -> SourcePathResolver.compare(SourcePathResolver.key(left), SourcePathResolver.key(right)));
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
@@ -83,8 +92,12 @@ final class SourceFilesystemFixture {
         Files.write(tree.getParent().resolve("manifest.json"), manifestBytes);
         String digest = LocalSourceRevisionCatalog.digest(manifestBytes);
         PreparedRevision receipt = new PreparedRevision(context, digest, "job-1", now);
+        Path statePath = root.resolve("sample/state.json");
+        Map<String, PreparedRevision> publications = new java.util.HashMap<>();
+        if (Files.exists(statePath)) publications.putAll(mapper.readValue(Files.readAllBytes(statePath), SourceRepositoryState.class).published());
+        publications.put(context.revision(), receipt);
         SourceRepositoryState state = new SourceRepositoryState(1, context.repositoryId(),
-                Optional.of(new CurrentPublication(SHA, digest, "job-1", now)), Map.of(SHA, receipt),
+                Optional.of(new CurrentPublication(context.revision(), digest, "job-1", now)), publications,
                 new PreparationStatus(PreparationPhase.COMPLETE, Optional.of("job-1"), Optional.empty()));
         Files.createDirectories(root.resolve("sample"));
         Files.write(root.resolve("sample/state.json"), mapper.writeValueAsBytes(state));

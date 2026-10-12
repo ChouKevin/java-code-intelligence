@@ -3,7 +3,7 @@
   "info": {
     "title": "Published source, syntax and static Relations Query API",
     "version": "1.0.0",
-    "description": "Nine read-only Query operations use exact repositoryId plus a full 40-character lowercase revision. Source readiness and independent index readiness/coverage remain separate; Query never prepares an index or switches revisions. Use search_text for literal source occurrences, search_code for declaration names, get_outline for structure, find_relations for generation-pinned static declaration or candidate framework evidence, and read_source to verify original bytes or navigate Java with explicit folds. Static resolution is not runtime dispatch. list_files supports bounded depth-2 previews; read_source returns provenance-bound source/elision segments. Default page size 20 (maximum 100); index results are limited to 163840 UTF-8 JSON bytes and 524288 serialized MCP CallToolResult bytes. Source reads default to 200 lines per page, maximum 500, and 65536 source-content bytes."
+    "description": "Read-only Query operations use exact repositoryId plus a full 40-character lowercase revision. Source readiness and independent index readiness/coverage remain separate; Query never prepares an index or switches revisions. Use find_files for bounded inventory filename discovery without a content keyword, search_text for literal source occurrences, search_code for declaration names, get_outline for structure, find_relations for generation-pinned static declaration or candidate framework evidence, and read_source to verify original bytes or navigate Java with explicit folds. Static resolution is not runtime dispatch. list_files supports bounded depth-2 previews; read_source returns provenance-bound source/elision segments. Default page size 20 (maximum 100); index results are limited to 163840 UTF-8 JSON bytes and 524288 serialized MCP CallToolResult bytes. Source reads default to 200 lines per page, maximum 500, and 65536 source-content bytes."
   },
   "security": [
     {
@@ -366,6 +366,28 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/v1/find-files": {
+      "post": {
+        "operationId": "find_files",
+        "summary": "Discover matching inventory file paths without a content query or index.",
+        "description": "Required exact repositoryId/full revision from get_context and glob policy 1 filePattern; directory narrows without rebasing. Lists FILE metadata at any depth, including non-TEXT statuses, without reading bodies. Stable unsigned-UTF-8 path order, no total count; consume all pages for complete selection. limit20/max100; complete HTTP/MCP duplicated envelope bounded to524288bytes, complete-row overflow SOURCE_RESULT_TOO_LARGE. Five-second total deadline and shared search capacity, no partial-success timeout. Cursors authenticate operation/source-glob-1, exact context/manifest, original pattern, directory and limit for one Query process lifetime; preserve fields and restart from the same retained pin after process restart. Current advance never retargets pages, withdrawn source fails explicitly. No preparation, index creation, physical enumeration or symlink following. Read returned TEXT paths with read_source(raw) to verify bytes; navigationHint is NOT_VERIFIED.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FileFindRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Same exact-source metadata page as MCP structuredContent and text JSON.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FileFindResult" } } } },
+          "400": { "description": "INVALID_ARGUMENT: malformed pattern, scope, identity, fields or cursor.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticQueryError" } } } },
+          "401": { "description": "Query token required.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuerySecurityError" } } } },
+          "403": { "description": "Query access disabled.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuerySecurityError" } } } },
+          "404": { "description": "Repository/revision/directory unavailable; never retarget to current.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticQueryError" } } } },
+          "409": { "description": "Source not prepared.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticQueryError" } } } },
+          "413": { "description": "SOURCE_RESULT_TOO_LARGE: complete row/envelope/cursor cannot fit; no empty continuation loop.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticQueryError" } } } },
+          "503": { "description": "SOURCE_BUSY or SOURCE_UNAVAILABLE.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticQueryError" } } } },
+          "504": { "description": "SOURCE_TIMEOUT, no partial-success result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticQueryError" } } } }
         }
       }
     },
@@ -1087,6 +1109,27 @@
         ],
         "additionalProperties": false
       },
+      "FoundFile": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "description": "Complete repository-relative admitted FILE path." },
+          "status": { "type": "string", "enum": ["TEXT", "BINARY", "UNSUPPORTED_ENCODING", "UNSUPPORTED_PATH", "SYMLINK", "SUBMODULE", "LFS_POINTER"], "description": "Published status, not a claim of readability." },
+          "byteLength": { "type": "integer", "minimum": 0, "description": "Published source byte length." },
+          "navigationHint": { "type": "boolean", "description": "Whether this TEXT path is the published guide; NOT_VERIFIED." }
+        },
+        "required": ["path", "status", "byteLength", "navigationHint"],
+        "additionalProperties": false
+      },
+      "FileFindResult": {
+        "type": "object",
+        "properties": {
+          "context": { "$ref": "#/components/schemas/SourceContext" },
+          "items": { "type": "array", "maxItems": 100, "items": { "$ref": "#/components/schemas/FoundFile" }, "description": "One row per matching FILE in unsigned-UTF-8 path order, no bodies/directories." },
+          "page": { "$ref": "#/components/schemas/Page", "description": "Exactly returned row count; follow all pages for complete selection." }
+        },
+        "required": ["context", "items", "page"],
+        "additionalProperties": false
+      },
       "FileCollection": {
         "type": "object",
         "properties": {
@@ -1283,6 +1326,21 @@
         ],
         "additionalProperties": false
       },
+      "FileFindRequest": {
+        "type": "object",
+        "properties": {
+          "context": { "$ref": "#/components/schemas/SourceContext", "description": "Required exact repositoryId/full lowercase revision from get_context." },
+          "filePattern": {
+            "type": "string", "minLength": 1, "maxLength": 256,
+            "description": "Required glob policy 1, identical to search_text.filePattern: case-sensitive complete repository-relative Unicode scalar paths, / separator, no normalization. pom.xml root-only; *.java equals **/*.java; src/**/*.java includes direct/nested files. directory narrows without rebasing. * segment-local, ? and [abc]/[a-z]/[!a-z] one scalar; ^ literal and hyphen literal at class edges. ** whole segment; **/ zero or more directories, terminal /** descendants only. Nested positive braces flatten and normalize bare wildcard branches separately; literal alternatives stay root-only. Backslash escapes * ? [ ] { } ! comma; class metacharacters may be escaped; decoded backslash invalid. Spaces/semicolons literal. Limits:256 scalars, brace depth4,64 expansions,8192 states,65536 generated native UTF-8 bytes including separators. INVALID_ARGUMENT for malformed/empty/single alternatives, descending ranges, POSIX classes/numeric expansion/extglob, leading exclusion !, embedded ** or ***, controls/invalid Unicode, absolute/drive/URI paths, empty/dot/traversal segments/trailing separator and dangling/unsupported escapes. No trim/repair/fallback. Valid absent/excluded selections succeed empty."
+          },
+          "directory": { "type": "string", "default": "", "description": "Literal repository-relative subtree; empty root. Does not rebase pattern." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+          "cursor": { "type": "string", "minLength": 1, "description": "Authenticated process-lifetime continuation; preserve exact context, original pattern, directory and limit." }
+        },
+        "required": ["context", "filePattern"],
+        "additionalProperties": false
+      },
       "FileListRequest": {
         "type": "object",
         "properties": {
@@ -1329,11 +1387,13 @@
             "description": "At most 256 Unicode code points, literal case-sensitive and single-line."
           },
           "directory": {
-            "type": "string"
+            "type": "string",
+            "description": "Literal repository-relative subtree; empty means root. Narrows candidates without rebasing filePattern."
           },
           "filePattern": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Glob policy 1: case-sensitive complete repository-relative paths, / separator and Unicode scalars, no normalization. pom.xml selects only root; *.java equals **/*.java; src/**/*.java includes direct and nested files. directory narrows without rebasing. * is segment-local, ? and [abc]/[a-z]/[!a-z] consume one scalar (^ literal); ** is a whole segment, **/ consumes zero or more directories and terminal /** selects descendants. Nested positive braces flatten; normalize bare wildcard branches separately, while literal branches remain root-only. Backslash escapes * ? [ ] { } ! comma and backslash; decoded backslash is invalid. Spaces/semicolons are literal. Maximum 256 scalars, brace depth 4, 64 expansions, 8192 matcher states and 65536 generated native UTF-8 bytes including separators. INVALID_ARGUMENT for malformed/empty/single alternatives, descending ranges, POSIX classes, numeric expansion, extglob, leading exclusion !, embedded ** or ***, controls, invalid Unicode, absolute/drive/URI paths, empty/dot/traversal segments, trailing slash and dangling/unsupported escapes. No trimming, repair or fallback. Valid absent/excluded selections succeed empty."
           },
           "limit": {
             "type": "integer",

@@ -37,6 +37,11 @@ public final class SemanticQueryController {
         return facade.execute("list_files", input);
     }
 
+    @PostMapping("/find-files")
+    public Object findFiles(@RequestBody Map<String, Object> input) {
+        return facade.execute("find_files", input);
+    }
+
     @PostMapping("/search-text")
     public Object searchText(@RequestBody Map<String, Object> input) {
         return facade.execute("search_text", input);

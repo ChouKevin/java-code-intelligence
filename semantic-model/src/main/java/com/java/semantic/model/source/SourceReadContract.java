@@ -50,6 +50,17 @@ public final class SourceReadContract {
         }
     }
 
+    public record FileFindRequest(SourceContext context, String filePattern, String directory,
+            int limit, Optional<String> cursor) {
+        public FileFindRequest {
+            context = Objects.requireNonNull(context, "source context");
+            filePattern = requirePattern(filePattern);
+            directory = SourcePathPolicy.requireDirectory(directory);
+            requireLimit(limit);
+            cursor = requireCursor(cursor);
+        }
+    }
+
     public record TextSearchRequest(SourceContext context, String query, String directory,
             Optional<String> filePattern, int limit) {
         public TextSearchRequest {
@@ -60,10 +71,7 @@ public final class SourceReadContract {
                     "query must be a nonempty single-line literal of at most 256 Unicode code points");
             directory = SourcePathPolicy.requireDirectory(directory);
             filePattern = Objects.requireNonNull(filePattern, "file pattern");
-            filePattern.ifPresent(pattern -> {
-                SourcePathPolicy.requireFile(pattern);
-                ModelValidation.require(!pattern.startsWith("!"), "file pattern must be a positive relative glob");
-            });
+            filePattern.ifPresent(SourceReadContract::requirePattern);
             requireLimit(limit);
         }
     }
@@ -175,6 +183,26 @@ public final class SourceReadContract {
             items = List.copyOf(Objects.requireNonNull(items, "file entries"));
             page = Objects.requireNonNull(page, "file page");
             ModelValidation.require(items.size() == page.returned(), "file page must describe returned entries");
+        }
+    }
+
+    public record FoundFile(String path, EntryStatus status, long byteLength, boolean navigationHint) {
+        public FoundFile {
+            path = SourcePathPolicy.requireFile(path);
+            status = Objects.requireNonNull(status, "entry status");
+            ModelValidation.require(byteLength >= 0, "byte length must not be negative");
+            ModelValidation.require(!navigationHint || status == EntryStatus.TEXT,
+                    "navigation hints require text source");
+        }
+    }
+
+    public record FileFindResult(SourceContext context, List<FoundFile> items, Page page) {
+        public FileFindResult {
+            context = Objects.requireNonNull(context, "source context");
+            items = List.copyOf(Objects.requireNonNull(items, "found files"));
+            page = Objects.requireNonNull(page, "file page");
+            ModelValidation.require(items.size() == page.returned(), "file page must describe returned entries");
+            ModelValidation.require(!page.hasMore() || !items.isEmpty(), "continuation must advance");
         }
     }
 
@@ -318,6 +346,14 @@ public final class SourceReadContract {
         Objects.requireNonNull(cursor, "cursor");
         cursor.ifPresent(value -> ModelValidation.requiredText(value, "cursor"));
         return cursor;
+    }
+
+    private static String requirePattern(String pattern) {
+        requireUnicode(pattern);
+        ModelValidation.require(!pattern.isBlank() && pattern.codePointCount(0, pattern.length()) <= 256
+                        && pattern.codePoints().noneMatch(Character::isISOControl),
+                "file pattern must be nonblank valid Unicode of at most 256 scalar values without controls");
+        return pattern;
     }
 
     private static String requireUnicode(String value) {

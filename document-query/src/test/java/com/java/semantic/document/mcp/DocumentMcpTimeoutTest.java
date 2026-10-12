@@ -61,7 +61,7 @@ class DocumentMcpTimeoutTest {
                 Map<String, Object> readArguments = Map.of("documentContext", oldRead.documentContext(),
                         "path", DocumentFixture.GUIDE, "sectionStartLine", 1);
                 long started = System.nanoTime();
-                CompletableFuture<HttpResponse<String>> firstResponse = call(client, endpoint, fixture, "read_document", readArguments);
+                CompletableFuture<HttpResponse<String>> firstResponse = call(client, endpoint, fixture, "list_documents", Map.of());
                 CompletableFuture<HttpResponse<String>> secondResponse = call(client, endpoint, fixture, "read_document", readArguments);
                 assertThat(delay.entered.await(5, TimeUnit.SECONDS)).isTrue();
                 assertError(fixture, firstResponse.get(15, TimeUnit.SECONDS), "DOCUMENT_TIMEOUT");
@@ -101,6 +101,11 @@ class DocumentMcpTimeoutTest {
                 assertThat(recovered.path("isError").asBoolean()).isFalse();
                 assertThat(recovered.path("structuredContent").path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
                 assertThat(recovered.path("structuredContent").path("items").get(0).path("snippet").stringValue()).contains("new evidence");
+                JsonNode recoveredList = response(fixture,
+                        call(client, endpoint, fixture, "list_documents", Map.of()).get(2, TimeUnit.SECONDS));
+                assertThat(recoveredList.path("isError").booleanValue()).isFalse();
+                assertThat(recoveredList.path("structuredContent").path("items").get(0).path("documentContext")
+                        .path("documentRevision").stringValue()).isEqualTo(second);
             } finally {
                 delay.release.countDown();
                 application.close();

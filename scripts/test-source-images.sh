@@ -303,9 +303,9 @@ refresh_source() {
 initialize_query_mcp
 mcp_request "${query_url}" query-smoke-only "${query_session}" \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-jq -e '[.result.tools[].name] | sort ==
-  (["list_repositories","get_context","list_files","search_text","read_source","search_code","get_outline","list_entry_points","find_relations"] | sort)' \
-  "${root}/mcp.json" >/dev/null || fail 'Query does not advertise exactly nine tools'
+jq -e '.result.tools | all(.[]; .name != "prepare_source"
+  and .name != "prepare_semantic_index" and .name != "get_job")' \
+  "${root}/mcp.json" >/dev/null || fail 'Query advertises private preparation tools'
 mcp_request "${indexer_url}" indexer-smoke-only '' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"image-smoke","version":"3"}}}'
 mcp_request "${indexer_url}" indexer-smoke-only '' \
@@ -324,6 +324,10 @@ context_a="{\"repositoryId\":\"fixture\",\"revision\":\"${revision}\"}"
 call_query_mcp list_repositories '{}'
 call_query_mcp get_context "{\"repositoryId\":\"fixture\",\"revision\":\"${revision}\"}"
 call_query_mcp list_files "{\"context\":${context_a},\"directory\":\"\"}"
+call_query_mcp find_files "{\"context\":${context_a},\"filePattern\":\"*.java\"}"
+capture_mcp_payload "${root}/mcp-find-files.json"
+jq -e '.items | any(.path == "Example.java" and .status == "TEXT")' \
+  "${root}/mcp-find-files.json" >/dev/null || fail 'filename discovery missed published source'
 call_query_mcp search_text "{\"context\":${context_a},\"query\":\"source-image-needle\"}"
 capture_mcp_payload "${root}/mcp-search-text.json"
 call_query_mcp read_source "{\"context\":${context_a},\"path\":\"Example.java\",\"view\":\"raw\"}"
@@ -383,6 +387,8 @@ capture_mcp_payload "${root}/mcp-entry-points.json"
 assert_http_mcp_parity 'list_entry_points' "${root}/http-entry-points.json" "${root}/mcp-entry-points.json"
 post_query context '{"repositoryId":"fixture"}'
 jq -e --arg sha "${revision}" '.sourceStatus == "READY" and .context.repositoryId == "fixture" and .context.revision == $sha' "${root}/query.json" >/dev/null || fail 'Query did not admit published SHA'
+post_query find-files "{\"context\":${context_a},\"filePattern\":\"*.java\"}"
+assert_http_mcp_parity 'find_files' "${root}/query.json" "${root}/mcp-find-files.json"
 post_query search-text "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":\"${revision}\"},\"query\":\"source-image-needle\"}"
 jq -e '.matches | any(.path == "Example.java" and .line == 2)' "${root}/query.json" >/dev/null || fail 'real ripgrep search did not find fixture source'
 assert_http_mcp_parity 'search_text' "${root}/query.json" "${root}/mcp-search-text.json"
@@ -580,6 +586,9 @@ assert_source_tools() {
   call_query_mcp list_repositories '{}'
   call_query_mcp get_context "{\"repositoryId\":\"fixture\",\"revision\":\"${revision_b}\"}"
   call_query_mcp list_files "{\"context\":${context_b},\"directory\":\"\"}"
+  call_query_mcp find_files "{\"context\":${context_b},\"filePattern\":\"*.java\"}"
+  jq -e 'any(.result.structuredContent.items[]; .path == "Example.java" and .status == "TEXT")' \
+    "${root}/mcp.json" >/dev/null || fail 'native failure broke filename discovery'
   call_query_mcp search_text "{\"context\":${context_b},\"query\":\"source-image-needle-B\"}"
   jq -e 'any(.result.structuredContent.matches[]; .path == "Example.java" and .line == 2)' \
     "${root}/mcp.json" >/dev/null || fail 'native failure broke source search'
@@ -610,4 +619,4 @@ curl -sS --max-time 10 -X DELETE -o /dev/null \
   -H 'X-Api-Token: query-smoke-only' -H "Mcp-Session-Id: ${query_session}" \
   -H 'MCP-Protocol-Version: 2025-06-18' "${query_url}/mcp"
 successful=1
-echo 'Source/index images: real Git A/B refresh, current-only child-built profile-3 SQLite and static Relations HTTP/MCP parity, segmented raw-byte citation, nine/three MCP tools, retained historical generations, source-independent native failure, read-only UID locking, GC and isolation passed'
+echo 'Source/index images: real Git A/B refresh, current-only child-built profile-3 SQLite and static Relations HTTP/MCP parity, filename discovery and segmented raw-byte citation, private/public MCP isolation, retained historical generations, source-independent native failure, read-only UID locking, GC and isolation passed'

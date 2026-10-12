@@ -8,6 +8,8 @@ import com.java.semantic.mcp.SessionOwnedMcpTransport;
 import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.source.SourceReadContract.FileCollection;
 import com.java.semantic.model.source.SourceReadContract.FileListRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindResult;
 import com.java.semantic.model.source.SourceReadContract.ReadSourceRequest;
 import com.java.semantic.model.source.SourceReadContract.SourceResult;
 import com.java.semantic.model.source.SourceReadContract.TextSearchRequest;
@@ -73,6 +75,11 @@ class McpSessionCloseFenceTest {
             @Override
             public FileCollection listFiles(AdmittedSourceRevision revision, FileListRequest request) {
                 return source.listFiles(revision, request);
+            }
+
+            @Override
+            public FileFindResult findFiles(AdmittedSourceRevision revision, FileFindRequest request) {
+                return source.findFiles(revision, request);
             }
 
             @Override

@@ -687,5 +687,299 @@
       "idempotentHint": true,
       "openWorldHint": false
     }
+  },
+  {
+    "name": "list_documents",
+    "description": "List latest effective NOT_VERIFIED document metadata without a keyword. Omit repositoryId to browse all selected owners or provide one owner; global pages can contain different document revisions. Return one row per complete document in natural catalog-path order, with no body or snippet. section is the first actual parsed span, including a real prefix span, and its context/path/startLine is a read_document entry. Repeat the exact scope and requested limit with a cursor. Effective owner changes expire global cursors; only that owner's change expires a scoped cursor. No-op publication preserves cursors; tampering or process restart requires restarting from the first page. Unknown valid owners and an empty selected map return successful empty pages. Documents remain NOT_VERIFIED navigation; independently verify business claims with exact Source evidence.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+          "description": "Optional business-repository owner; a valid owner without an effective publication returns an empty page."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 10
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Process-authenticated continuation, at most 4096 UTF-8 bytes. Repeat the same requested limit and repository scope."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "documentRepositoryId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "repositoryId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "collectionPurpose": {
+              "type": "string",
+              "enum": [
+                "TEST_ONLY",
+                "APPROVED"
+              ]
+            },
+            "trust": {
+              "type": "string",
+              "enum": [
+                "NOT_VERIFIED"
+              ]
+            },
+            "publicationStatus": {
+              "type": "string",
+              "enum": [
+                "READY",
+                "UPDATE_REJECTED"
+              ]
+            },
+            "publicationErrorCode": {
+              "type": "string",
+              "enum": [
+                "DOCUMENT_CATALOG_INVALID",
+                "DOCUMENT_CAPACITY_EXCEEDED",
+                "DOCUMENT_UNAVAILABLE"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/listItem"
+              },
+              "maxItems": 20,
+              "description": "One complete effective document per row; metadata only, without Markdown body or search snippet."
+            },
+            "page": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 20
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "description": "Process-authenticated continuation to the next catalog path. Repeat the same requested limit and repository scope."
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "documentRepositoryId",
+            "collectionPurpose",
+            "trust",
+            "publicationStatus",
+            "items",
+            "page"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/error"
+        }
+      ],
+      "$defs": {
+        "documentContext": {
+          "type": "object",
+          "properties": {
+            "documentRepositoryId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "repositoryId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "documentRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$",
+              "minLength": 40,
+              "maxLength": 40
+            }
+          },
+          "required": [
+            "documentRepositoryId",
+            "repositoryId",
+            "documentRevision"
+          ],
+          "additionalProperties": false
+        },
+        "sourceContext": {
+          "type": "object",
+          "properties": {
+            "repositoryId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$",
+              "minLength": 40,
+              "maxLength": 40
+            }
+          },
+          "required": [
+            "repositoryId",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "section": {
+          "type": "object",
+          "properties": {
+            "startLine": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "titleTruncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "startLine",
+            "title",
+            "titleTruncated"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_ARGUMENT",
+                "DOCUMENT_REPOSITORY_NOT_FOUND",
+                "DOCUMENT_REVISION_NOT_AVAILABLE",
+                "DOCUMENT_NOT_FOUND",
+                "DOCUMENT_SECTION_NOT_FOUND",
+                "DOCUMENT_CATALOG_INVALID",
+                "DOCUMENT_CAPACITY_EXCEEDED",
+                "DOCUMENT_RESULT_TOO_LARGE",
+                "DOCUMENT_BUSY",
+                "DOCUMENT_TIMEOUT",
+                "DOCUMENT_UNAVAILABLE"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "listItem": {
+          "type": "object",
+          "properties": {
+            "documentContext": {
+              "$ref": "#/$defs/documentContext"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "description": "Literal catalog path, at most 512 UTF-8 bytes; copy it with documentContext and section.startLine to read_document."
+            },
+            "contentDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "section": {
+              "$ref": "#/$defs/section",
+              "description": "The first actual parsed span of this document, including a real prefix span when present."
+            },
+            "primaryContext": {
+              "$ref": "#/$defs/sourceContext"
+            },
+            "relatedContexts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sourceContext"
+              },
+              "maxItems": 32
+            },
+            "reviewStatus": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "APPROVED"
+              ]
+            },
+            "reviewReference": {
+              "type": "string",
+              "maxLength": 262144,
+              "description": "Operator review provenance, not proof of source correctness."
+            }
+          },
+          "required": [
+            "documentContext",
+            "path",
+            "contentDigest",
+            "byteLength",
+            "section",
+            "primaryContext",
+            "relatedContexts",
+            "reviewStatus"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   }
 ]

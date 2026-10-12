@@ -62,7 +62,7 @@ repositoryId: {{approvedRepositoryId}}
 - 分開報告 Git HEAD `candidateRevision`、受影響 owner、resulting owner-to-document-commit map、`commitCreated`／`selectionChanged` 與 running Document MCP 查證。CLI 結果為 `serviceVerified:false`，不證明服務採用；selection write failure 後先查 status/Git/MCP，再於輸入未變時明確重做同一 update/remove，不改用任意舊 commit 或盲目重送。
 - 每個 business repo 維護一個 effective document group；更新 A 只改 A，B 保留自身已選 document commit。Source change／rollback 後按 resulting SHA 修訂 named current docs 並在 document Git forward-commit；source/document lag 允許，不反選舊 document commit，也不自動同步。
 - Relationship statements 由其 primary owner guide 持有；related source contexts 只是 provenance，不轉移文件 ownership、不觸發其他 owner 發布或自動重寫。另一側未查則保留未知，不編造 repositoryId 或 SHA。
-- 查歷史 source 時，current navigation 只提供查找線索；仍以使用者指定 source SHA 執行 list/search/read。沒有該歷史版本的文件不構成 source 缺席，也不改查 source current。
+- 查歷史 source 時，current navigation 只提供查找線索；仍以使用者指定 source SHA 執行 list/find/search/read。沒有該歷史版本的文件不構成 source 缺席，也不改查 source current。
 
 ### TEST_ONLY 測試授權
 
@@ -84,7 +84,7 @@ Docker／下載或主專案 commit／merge／push。環境建立、資源檢查�
 
 | 身分／資料 | 要求 |
 | --- | --- |
-| 文件來源 | 每個 hit/read 的完整 `{documentRepositoryId,repositoryId,documentRevision}`、相對 path、原始章節起始行；citation 為 `documentRepositoryId@fullDocumentCommit:path#L<sectionStartLine>` |
+| 文件來源 | 每個 listing row/hit/read 的完整 `{documentRepositoryId,repositoryId,documentRevision}`、相對 path、原始章節起始行；citation 為 `documentRepositoryId@fullDocumentCommit:path#L<sectionStartLine>` |
 | 分析來源 | 主 repositoryId／完整 analyzedRevision；跨 repo 證據各自的 source context |
 | 審閱／信任 | 精確內容的審閱狀態與核准依據；NOT_VERIFIED 永不因審閱而變 VERIFIED |
 | 內容／限制 | 搜尋片段及其原始章節 locator；`read_document` 固定版本後回傳單一完整文件，保留 header、contexts、evidence、已讀／未讀範圍及未知事項 |
@@ -92,6 +92,8 @@ Docker／下載或主專案 commit／merge／push。環境建立、資源檢查�
 文件 commit 在提交後由交付／索引層附加，**不能要求文件嵌入自身 hash**。Source SHA 是分析的業務版本，不是文件版本；兩者都不能猜測。未提交測試文件使用明確名稱與內容 digest 標示實際輸入，不能造出文件 commit 或 APPROVED。
 
 按可獨立理解的章節索引，不任意切斷表格、限定語或證據關聯。每個片段附回其完整文件身分、主 source context 與章節 locator；完整讀取固定同一文件 commit，並包含被引用的 evidence／跨 repo contexts 與限制。下方模板的 header、Repository contexts 與 Evidence 雖分節保存，交付 Modules／Relationships 等單節時必須一併附上所需 header、context rows、被引用的 evidence rows 與限制；不能只抽出標題下的文字或憑搜尋摘要回答程式行為。
+
+沒有關鍵字時，先用 `list_documents {repositoryId?,limit?,cursor?}` 瀏覽最新有效文件 metadata；每份文件只列一筆，沿回傳 context/path/section.startLine 讀完整文件。這不是另一份需管理的文件，也不增加歷史文件版本。Listing 與 search 的 cursor 綁定各自操作，不能交替使用；兩者採相同 owner/global 失效規則。初步專案探索由 query skill 控制讀取範圍，不自動回寫成 guide。
 
 `search_documents {query,limit?,cursor?,repositoryId?}` omits `repositoryId` for global scope and may return hits from several owner commits. Its envelope has `documentRepositoryId`, optional selected `repositoryId`, `collectionPurpose`, `trust`, `publicationStatus`, optional `publicationErrorCode`, `items`, and `page`; there is no single top-level `documentContext`. Each hit carries its complete `{documentRepositoryId,repositoryId,documentRevision}`. `read_document` uses that exact context, hit path, and actual `sectionStartLine`. Cursors bind query/limit/scope: any effective owner addition/update/removal invalidates a global cursor, while scoped cursor expires only on its owner change; owner no-op does not expire either. Updating A leaves unchanged B read/scoped cursor valid, including B hit from an old global page. Stale owner contexts fail rather than retarget; `UPDATE_REJECTED` means the actual last-good map remains. See [per-owner format, cursor and cutover](document-mcp.md#selection-per-owner-publication-and-cutover).
 

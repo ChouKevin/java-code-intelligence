@@ -19,7 +19,7 @@ JavaParser and its optional Symbol Solver run only in Indexer. No service runs a
 
 1. **Deploy and register.** Follow [Source MCP operations](docs/operations/source-mcp.md#bootstrap-and-trust-boundaries). Give Indexer its private storage/admin token; give Source Query only read-only published source/index mounts, its own read token and an explicit repository allowlist. Registration alone does not prepare source.
 2. **Prepare source explicitly.** Persist a canonical UUID `requestId`, then call private `prepare_source`. Without `revision`, successful publication refreshes the configured default branch and advances current. With a full exact SHA, it adds/reuses readable membership without changing current. Resolve uncertain acceptance through the original request ID, not a new request.
-3. **Read through Source Query.** Discover repositories, obtain `get_context`, then list/search/read at that exact context. Query does not fetch or prepare missing revisions.
+3. **Read through Source Query.** Discover repositories, obtain `get_context`, then browse directories, find filenames, search text and read at that exact context. Query does not fetch or prepare missing revisions.
 4. **Add optional capabilities separately.** Prepare syntax/Relations only when requested; use the independent Document MCP for pregenerated navigation. Neither is a prerequisite for raw source reads.
 
 Keep actual registrations, allowlists, credentials and MCP client settings outside tracked files. See [local configuration](docs/operations/source-mcp.md#local-only-configuration-and-evidence). Repository IDs bind permanently to their approved origins; changing an origin requires a new ID/fresh namespace, not repointing existing storage.
@@ -30,7 +30,7 @@ Keep actual registrations, allowlists, credentials and MCP client settings outsi
 | --- | --- |
 | Register a repository, refresh source, prepare an exact SHA, enable indexing, update/remove/status local documents | [manage-repository](skills/manage-repository/SKILL.md) |
 | Draft/update repository descriptions or module/relationship guides | [describe-repository](skills/describe-repository/SKILL.md) |
-| Explain business rules, calculations, eligibility or service flows from source | [query-business-code](skills/query-business-code/SKILL.md) |
+| Explore an unfamiliar project, or explain modules, business rules, calculations, eligibility or service flows from source | [query-business-code](skills/query-business-code/SKILL.md) |
 
 Portable invocations do not require global skill installation:
 
@@ -46,6 +46,10 @@ Portable invocations do not require global skill installation:
 請先讀取 skills/query-business-code/SKILL.md，使用已授權的文件／Source Query MCP 查證 VIP 等級如何計算，附完整 repo/SHA/path/line 引用。
 ```
 
+```text
+請先讀取 skills/query-business-code/SKILL.md，透過文件／Source Query MCP 探索這個專案的用途、modules、候選入口、設定與測試位置；附完整來源引用，並列出尚未閱讀或無法確認的部分。
+```
+
 Clients must load [AGENTS.md](AGENTS.md) or explicitly read the relevant skill. Natural-language triggering and automatic skill installation are not guaranteed by MCP registration or tool descriptions. Skills do not grant permission to mutate services, fetch/build repositories or publish documents.
 
 ## Local documents and source discovery
@@ -56,13 +60,15 @@ The central document repository is **one local Git repository, with no remote**.
 
 Formal `APPROVED` updates require exact-content/source-identity human review; named removals require explicit removal approval. Explicitly authorized test fixtures remain `TEST_ONLY` / `DRAFT`, not production approval. Results include `serviceVerified:false`; local success is not proof that a running MCP adopted the map.
 
-`search_documents` searches all owners by default and accepts an optional `repositoryId` filter. Its result envelope identifies the central document repository and optional filter; each hit carries its own `{documentRepositoryId,repositoryId,documentRevision}` context, so a global page may contain different document commits. `read_document` requires that complete context, the exact path, and `sectionStartLine`. Updating A invalidates A's former document context, not unchanged B reads or B-scoped cursors; any effective owner-map change expires a global cursor, while a scoped cursor expires only when its owner changes. Source Query history and source pins are independent and unchanged.
+Use `list_documents` when no keyword is known, or `search_documents` for a literal keyword. Both browse all owners by default and accept an optional `repositoryId` filter. Listing returns one metadata row per complete document; search returns matching sections. Their result envelope identifies the central document repository and optional filter; every row carries its own `{documentRepositoryId,repositoryId,documentRevision}` context, so a global page may contain different document commits. `read_document` requires that complete context, the exact path, and returned `section.startLine` as `sectionStartLine`. Updating A invalidates A's former document context, not unchanged B reads or B-scoped cursors; any effective owner-map change expires a global cursor. Listing/search cursors are not interchangeable. Source Query history and source pins are independent and unchanged.
 
 On source change or rollback, revise the named current documents against the resulting source SHA and publish a forward document commit. Source/document lag is allowed; an analyzed source SHA is provenance, not a synchronization promise. Missing or stale documents trigger source discovery, not source deletion or evidence of absence.
 
 An existing deployment using the old selection/context shape is not migrated in place. A separately authorized cutover uses a fresh selection path populated by explicit per-owner updates; legacy selections and ownerless document contexts are rejected. Central Git history is not MCP historical membership.
 
 The optional short `navigation-hint` and repo-local `project-guide-path` remain separate discovery mechanisms. They are not prerequisites for central documents. Elasticsearch, vector search, scheduled document regeneration and automatic cross-repository graphs are not implemented.
+
+For unfamiliar source, use `list_files` for bounded directory previews and `find_files` for filename/path patterns before reading selected descriptors and raw source. `find_files.filePattern` and `search_text.filePattern` share one [glob policy](docs/operations/source-mcp.md#file-discovery-and-shared-glob-policy): `pom.xml` is root-exact, `*.java` includes descendants, and `src/**/*.java` includes both direct and deeper files. Invalid syntax is an error, not no matches. Initial exploration is bounded; a complete-list request follows all relevant pages. A build dependency or candidate entry does not prove runtime wiring or deployment.
 
 ## Interfaces
 
@@ -87,6 +93,7 @@ Source Query uses an initialized Streamable HTTP session per client; retain and 
 | `list_repositories` | `GET /api/v1/repositories` |
 | `get_context` | `POST /api/v1/context` |
 | `list_files` | `POST /api/v1/files` |
+| `find_files` | `POST /api/v1/find-files` |
 | `search_text` | `POST /api/v1/search-text` |
 | `read_source` | `POST /api/v1/source` |
 | `search_code` | `POST /api/v1/search-code` |
@@ -94,7 +101,7 @@ Source Query uses an initialized Streamable HTTP session per client; retain and 
 | `list_entry_points` | `POST /api/v1/entry-points` |
 | `find_relations` | `POST /api/v1/relations` |
 
-Document MCP exposes only `search_documents` and `read_document`; it has no publisher API or business REST API. See [Document MCP operations](docs/operations/document-mcp.md) for its command, schemas and bounds.
+Document MCP exposes `list_documents`, `search_documents` and `read_document`; it has no publisher API or business REST API. See [Document MCP operations](docs/operations/document-mcp.md) for its command, schemas and bounds.
 
 ## Version and evidence rules
 

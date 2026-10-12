@@ -2,6 +2,8 @@ package com.java.semantic.document.application;
 
 import com.java.semantic.document.application.DocumentContract.CollectionPurpose;
 import com.java.semantic.document.application.DocumentContract.DocumentContext;
+import com.java.semantic.document.application.DocumentContract.ListRequest;
+import com.java.semantic.document.application.DocumentContract.ListResult;
 import com.java.semantic.document.application.DocumentContract.ReadRequest;
 import com.java.semantic.document.application.DocumentContract.ReadResult;
 import com.java.semantic.document.application.DocumentContract.SearchRequest;
@@ -415,6 +417,285 @@ class DocumentQueryBehaviorTest {
         }
     }
 
+    @Test
+    void listsDocumentsWithoutQueryAndReadsReturnedEntry() throws Exception {
+        String aGuide = "Summary before the first heading\r\n# Alpha\r\nComplete evidence\r\n## Details\r\nMore evidence";
+        String aOverview = "# Overview\nA second selected document";
+        String bGuide = "Preamble before the first heading\r\n# Billing\r\nComplete billing evidence\r\n## Details\r\nQualification";
+        try (DocumentFixture fixture = new DocumentFixture(root.resolve("listing"))) {
+            String aRevision = fixture.commit(Map.of("repositories/sample/guide.md", aGuide,
+                    "repositories/sample/overview.md", aOverview));
+            String bRevision = commitOwners(fixture, Map.of("repositories/b/guide.md", bGuide));
+            fixture.publish(Map.of("sample", aRevision, "b", bRevision));
+            try (QueryFixture query = new QueryFixture(fixture)) {
+                ListResult result = list(query, Optional.empty(), Optional.empty(), 10);
+
+                assertThat(result.documentRepositoryId()).isEqualTo(DocumentFixture.DOCUMENT_REPOSITORY);
+                assertThat(result.repositoryId()).isEmpty();
+                assertThat(result.collectionPurpose()).isEqualTo(CollectionPurpose.TEST_ONLY);
+                assertThat(result.trust()).isEqualTo(DocumentContract.Trust.NOT_VERIFIED);
+                assertThat(result.publicationStatus()).isEqualTo(DocumentContract.PublicationStatus.READY);
+                assertThat(result.publicationErrorCode()).isEmpty();
+                assertThat(result.items()).extracting(item -> item.path()).containsExactly(
+                        "repositories/b/guide.md", "repositories/sample/guide.md", "repositories/sample/overview.md");
+                assertThat(result.items()).hasSize(3);
+                assertThat(result.page().returned()).isEqualTo(3);
+                assertThat(result.page().hasMore()).isFalse();
+                assertThat(result.page().nextCursor()).isEmpty();
+                assertThat(result.items().get(0).documentContext().documentRevision()).isEqualTo(bRevision);
+                assertThat(result.items().get(1).documentContext().documentRevision()).isEqualTo(aRevision);
+                assertThat(result.items().get(0).section())
+                        .isEqualTo(new DocumentContract.Section(1, "", false));
+                assertThat(result.items().get(1).section())
+                        .isEqualTo(new DocumentContract.Section(1, "", false));
+                assertThat(result.items().get(0).primaryContext().repositoryId()).isEqualTo("b");
+                assertThat(result.items().get(0).relatedContexts()).isEmpty();
+                assertThat(result.items().get(0).reviewStatus()).isEqualTo(DocumentContract.ReviewStatus.DRAFT);
+
+                String serialized = fixture.mapper.writeValueAsString(result);
+                assertThat(serialized).doesNotContain("\"content\"", "\"snippet\"");
+                DocumentContract.DocumentListItem entry = result.items().get(0);
+                ReadResult read = query.service.read(new ReadRequest(entry.documentContext(), entry.path(),
+                        entry.section().startLine()), value -> value);
+                assertThat(read.content()).isEqualTo(bGuide);
+                assertThat(read.section()).isEqualTo(entry.section());
+                assertThat(read.byteLength()).isEqualTo(bGuide.getBytes(StandardCharsets.UTF_8).length);
+
+                ListResult unknownOwner = list(query, Optional.of("unknown"), Optional.empty(), 10);
+                assertThat(unknownOwner.repositoryId()).contains("unknown");
+                assertThat(unknownOwner.items()).isEmpty();
+                assertThat(unknownOwner.page().returned()).isZero();
+                assertThat(unknownOwner.page().hasMore()).isFalse();
+
+                fixture.publish(Map.of());
+                ListResult emptyCatalog = list(query, Optional.empty(), Optional.empty(), 10);
+                assertThat(emptyCatalog.items()).isEmpty();
+                assertThat(emptyCatalog.page().returned()).isZero();
+                assertThat(emptyCatalog.page().hasMore()).isFalse();
+                assertThat(emptyCatalog.page().nextCursor()).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    void ownerIsolationAndOperationBoundCursors() throws Exception {
+        String aGuide = "repositories/a/guide.md";
+        String aOverview = "repositories/a/overview.md";
+        String bGuide = "repositories/b/guide.md";
+        String bOverview = "repositories/b/overview.md";
+        String aBody = "# A\nneedle one\n## More\nneedle two";
+        String aOverviewBody = "# A overview\nneedle overview\n## More\nneedle detail";
+        String bBody = "# B\nneedle one\n## More\nneedle two";
+        String bOverviewBody = "# B overview\nneedle overview\n## More\nneedle detail";
+        try (DocumentFixture fixture = new DocumentFixture(root.resolve("cursor-isolation"))) {
+            String aRevision = commitOwners(fixture, Map.of(aGuide, aBody, aOverview, aOverviewBody));
+            String bRevision = commitOwners(fixture, Map.of(bGuide, bBody, bOverview, bOverviewBody));
+            fixture.publish(Map.of("a", aRevision, "b", bRevision));
+            try (QueryFixture query = new QueryFixture(fixture)) {
+                ListResult initialGlobal = list(query, Optional.empty(), Optional.empty(), 1);
+                ListResult initialA = list(query, Optional.of("a"), Optional.empty(), 1);
+                ListResult initialB = list(query, Optional.of("b"), Optional.empty(), 1);
+                SearchResult initialSearch = search(query, Optional.empty(), Optional.empty(), 1);
+                String globalCursor = initialGlobal.page().nextCursor().orElseThrow();
+                String aCursor = initialA.page().nextCursor().orElseThrow();
+                String bCursor = initialB.page().nextCursor().orElseThrow();
+                String searchCursor = initialSearch.page().nextCursor().orElseThrow();
+
+                assertInvalid(() -> list(query, Optional.empty(), Optional.of(globalCursor), 2));
+                assertInvalid(() -> list(query, Optional.of("a"), Optional.of(globalCursor), 1));
+                assertInvalid(() -> query.service.search(new SearchRequest("needle", 1,
+                        Optional.of(globalCursor), Optional.empty()), value -> value));
+                assertInvalid(() -> query.service.list(new ListRequest(Optional.empty(), 1,
+                        initialSearch.page().nextCursor()), value -> value));
+                int signatureStart = globalCursor.indexOf('.') + 1;
+                char signatureCharacter = globalCursor.charAt(signatureStart);
+                String tampered = globalCursor.substring(0, signatureStart)
+                        + (signatureCharacter == 'A' ? 'B' : 'A') + globalCursor.substring(signatureStart + 1);
+                assertInvalid(() -> list(query, Optional.empty(), Optional.of(tampered), 1));
+                DocumentQueryService restarted = new DocumentQueryService(query.catalog,
+                        new DocumentCursorCodec(fixture.mapper), new DocumentOperationGate());
+                assertInvalid(() -> restarted.list(new ListRequest(Optional.empty(), 1, Optional.of(globalCursor)),
+                        value -> value));
+
+                fixture.publish(Map.of("a", aRevision, "b", bRevision));
+                assertThat(list(query, Optional.empty(), Optional.of(globalCursor), 1).items())
+                        .extracting(item -> item.path()).containsExactly(aOverview);
+                assertThat(list(query, Optional.of("a"), Optional.of(aCursor), 1).items())
+                        .extracting(item -> item.path()).containsExactly(aOverview);
+                assertThat(list(query, Optional.of("b"), Optional.of(bCursor), 1).items())
+                        .extracting(item -> item.path()).containsExactly(bOverview);
+                assertThat(search(query, Optional.empty(), Optional.of(searchCursor), 1).items().getFirst()
+                        .section().startLine()).isEqualTo(3);
+
+                ListResult staleGlobal = list(query, Optional.empty(), Optional.empty(), 1);
+                ListResult staleA = list(query, Optional.of("a"), Optional.empty(), 1);
+                ListResult stableB = list(query, Optional.of("b"), Optional.empty(), 1);
+                SearchResult staleSearch = search(query, Optional.empty(), Optional.empty(), 1);
+                DocumentContract.DocumentListItem bEntry = stableB.items().getFirst();
+                String updatedA = commitOwners(fixture, Map.of(aGuide, "# A updated\nnew evidence\n## More\nnew detail",
+                        aOverview, "# A overview updated\nnew summary"));
+                fixture.publish(Map.of("a", updatedA, "b", bRevision));
+
+                assertUnavailable(() -> list(query, Optional.empty(), staleGlobal.page().nextCursor(), 1));
+                assertUnavailable(() -> list(query, Optional.of("a"), staleA.page().nextCursor(), 1));
+                assertUnavailable(() -> search(query, Optional.empty(), staleSearch.page().nextCursor(), 1));
+                ListResult continuedB = list(query, Optional.of("b"), stableB.page().nextCursor(), 1);
+                assertThat(continuedB.items()).extracting(item -> item.path()).containsExactly(bOverview);
+                assertThat(continuedB.items().getFirst().documentContext().documentRevision()).isEqualTo(bRevision);
+                ReadResult bRead = query.service.read(new ReadRequest(bEntry.documentContext(), bEntry.path(),
+                        bEntry.section().startLine()), value -> value);
+                assertThat(bRead.content()).isEqualTo(bBody);
+
+                ListResult lastBPage = list(query, Optional.of("b"), Optional.empty(), 1);
+                fixture.publish(Map.of());
+                assertUnavailable(() -> list(query, Optional.of("b"), lastBPage.page().nextCursor(), 1));
+                assertThat(list(query, Optional.empty(), Optional.empty(), 1).items()).isEmpty();
+                assertThat(list(query, Optional.of("b"), Optional.empty(), 1).items()).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    void realMetadataPagesFitBudgetAndAnOversizedFirstRowFails() throws Exception {
+        String firstPath = "repositories/sample/a.md";
+        // A long direct filename increases the cursor while remaining an admissible document path.
+        String secondPath = "repositories/sample/" + "b".repeat(250) + ".md";
+        byte[] firstBody = "# One\nbody".getBytes(StandardCharsets.UTF_8);
+        byte[] secondBody = "# Two\nbody".getBytes(StandardCharsets.UTF_8);
+        try (DocumentFixture fixture = new DocumentFixture(root.resolve("first-row-budget"))) {
+            Map<String, byte[]> bodies = Map.of(firstPath, firstBody, secondPath, secondBody);
+            String baselineRevision = fixture.commitBytes(bodies,
+                    List.of(fixture.row(firstPath, firstBody), fixture.row(secondPath, secondBody)));
+            fixture.publish(Map.of("sample", baselineRevision));
+            try (QueryFixture query = new QueryFixture(fixture)) {
+                ListRequest request = new ListRequest(Optional.empty(), 1, Optional.empty());
+                ListResult templateList = query.service.list(request, value -> value);
+                assertThat(templateList.items()).extracting(item -> item.path())
+                        .containsExactly(firstPath);
+                assertThat(templateList.page().hasMore()).isTrue();
+                DocumentContract.DocumentListItem firstItem = templateList.items().getFirst();
+                ReadResult templateRead = query.service.read(new ReadRequest(firstItem.documentContext(),
+                        firstItem.path(), firstItem.section().startLine()), value -> value);
+
+                // Size against the real admission envelope; the same metadata plus a list cursor must exceed it.
+                int low = 0;
+                int high = DocumentContract.MAX_CATALOG_BYTES / 2 - 4096;
+                while (low < high) {
+                    int middle = low + (high - low + 1) / 2;
+                    ReadResult candidate = admissionRead(templateRead,
+                            Optional.of("\\".repeat(middle)));
+                    try {
+                        query.writer.success(candidate);
+                        low = middle;
+                    } catch (DocumentFailure failure) {
+                        assertThat(failure.code()).isEqualTo(DocumentFailure.Code.DOCUMENT_RESULT_TOO_LARGE);
+                        high = middle - 1;
+                    }
+                }
+                assertThat(low).isPositive();
+                String reviewReference = "\\".repeat(low);
+                ReadResult fittingAdmissionEnvelope = admissionRead(templateRead, Optional.of(reviewReference));
+                McpSchema.CallToolResult admissionEnvelope = query.writer.success(fittingAdmissionEnvelope);
+                assertThat(fixture.mapper.writeValueAsBytes(admissionEnvelope).length)
+                        .isLessThanOrEqualTo(DocumentContract.MAX_RESULT_BYTES);
+                assertThatThrownBy(() -> query.writer.success(listWithReference(templateList, reviewReference)))
+                        .isInstanceOfSatisfying(DocumentFailure.class,
+                                failure -> assertThat(failure.code())
+                                        .isEqualTo(DocumentFailure.Code.DOCUMENT_RESULT_TOO_LARGE));
+
+                Map<String, Object> largeRow = fixture.row(firstPath, firstBody);
+                largeRow.put("reviewReference", reviewReference);
+                String admittedRevision = fixture.commitBytes(bodies,
+                        List.of(largeRow, fixture.row(secondPath, secondBody)));
+                fixture.publish(Map.of("sample", admittedRevision));
+                ReadResult admittedRead = query.service.read(new ReadRequest(new DocumentContext(
+                        DocumentFixture.DOCUMENT_REPOSITORY, "sample", admittedRevision), firstPath, 1), value -> value);
+                assertThat(admittedRead.documentContext().documentRevision()).isEqualTo(admittedRevision);
+                assertThat(admittedRead.reviewReference()).contains(reviewReference);
+                assertThat(fixture.mapper.writeValueAsBytes(query.writer.success(admittedRead)).length)
+                        .isLessThanOrEqualTo(DocumentContract.MAX_RESULT_BYTES);
+
+                ListResult oversizedList = query.service.list(request, value -> value);
+                assertThat(oversizedList.items()).extracting(item -> item.path()).containsExactly(firstPath);
+                assertThat(oversizedList.items().getFirst().reviewReference()).contains(reviewReference);
+                assertThat(oversizedList.page().hasMore()).isTrue();
+                assertThatThrownBy(() -> query.writer.success(oversizedList))
+                        .isInstanceOfSatisfying(DocumentFailure.class,
+                                failure -> assertThat(failure.code())
+                                        .isEqualTo(DocumentFailure.Code.DOCUMENT_RESULT_TOO_LARGE));
+                assertThatThrownBy(() -> query.service.list(request, query.writer::success))
+                        .isInstanceOfSatisfying(DocumentFailure.class,
+                                failure -> assertThat(failure.code())
+                                        .isEqualTo(DocumentFailure.Code.DOCUMENT_RESULT_TOO_LARGE));
+            }
+        }
+
+        try (DocumentFixture fixture = new DocumentFixture(root.resolve("paged-budget"))) {
+            byte[] body = "# One\nbody".getBytes(StandardCharsets.UTF_8);
+            String reviewReference = "\\".repeat(50_000);
+            Map<String, Object> firstRow = fixture.row("repositories/sample/a.md", body);
+            Map<String, Object> secondRow = fixture.row("repositories/sample/b.md", body);
+            firstRow.put("reviewReference", reviewReference);
+            secondRow.put("reviewReference", reviewReference);
+            String revision = fixture.commitBytes(Map.of("repositories/sample/a.md", body,
+                    "repositories/sample/b.md", body), List.of(firstRow, secondRow));
+            fixture.publish(Map.of("sample", revision));
+            try (QueryFixture query = new QueryFixture(fixture)) {
+                ListRequest request = new ListRequest(Optional.empty(), 2, Optional.empty());
+                ListResult untrimmed = query.service.list(request, value -> value);
+                assertThatThrownBy(() -> query.writer.success(untrimmed))
+                        .isInstanceOfSatisfying(DocumentFailure.class,
+                                failure -> assertThat(failure.code())
+                                        .isEqualTo(DocumentFailure.Code.DOCUMENT_RESULT_TOO_LARGE));
+
+                MaterializedList firstPage = query.service.list(request,
+                        value -> new MaterializedList(value, query.writer.success(value)));
+                assertThat(firstPage.wireResult().isError()).isFalse();
+                assertThat(fixture.mapper.writeValueAsBytes(firstPage.wireResult()).length)
+                        .isLessThanOrEqualTo(DocumentContract.MAX_RESULT_BYTES);
+                assertThat(firstPage.result().items()).extracting(item -> item.path())
+                        .containsExactly("repositories/sample/a.md");
+                assertThat(firstPage.result().page().hasMore()).isTrue();
+                assertThat(firstPage.result().items().getFirst().reviewReference()).contains(reviewReference);
+
+                ListRequest continuation = new ListRequest(Optional.empty(), 2,
+                        firstPage.result().page().nextCursor());
+                MaterializedList secondPage = query.service.list(continuation,
+                        value -> new MaterializedList(value, query.writer.success(value)));
+                assertThat(fixture.mapper.writeValueAsBytes(secondPage.wireResult()).length)
+                        .isLessThanOrEqualTo(DocumentContract.MAX_RESULT_BYTES);
+                assertThat(secondPage.result().items()).extracting(item -> item.path())
+                        .containsExactly("repositories/sample/b.md");
+                assertThat(secondPage.result().page().hasMore()).isFalse();
+                assertThat(secondPage.result().items().getFirst().documentContext().documentRevision())
+                        .isEqualTo(revision);
+                assertThat(List.of(firstPage.result().items().getFirst(), secondPage.result().items().getFirst()))
+                        .extracting(item -> item.path())
+                        .containsExactly("repositories/sample/a.md", "repositories/sample/b.md");
+            }
+        }
+    }
+
+    private static ReadResult admissionRead(ReadResult template, Optional<String> reviewReference) {
+        return new ReadResult(template.documentContext(), template.path(), template.blobId(), template.contentDigest(),
+                template.byteLength(), template.section(), template.primaryContext(), template.relatedContexts(),
+                template.reviewStatus(), reviewReference, template.collectionPurpose(), template.trust(),
+                DocumentContract.PublicationStatus.UPDATE_REJECTED,
+                Optional.of(DocumentFailure.Code.DOCUMENT_CAPACITY_EXCEEDED), template.scope(), template.startLine(),
+                template.endLine(), template.content());
+    }
+
+    private static ListResult listWithReference(ListResult template, String reviewReference) {
+        DocumentContract.DocumentListItem original = template.items().getFirst();
+        DocumentContract.DocumentListItem item = new DocumentContract.DocumentListItem(original.documentContext(),
+                original.path(), original.contentDigest(), original.byteLength(), original.section(),
+                original.primaryContext(), original.relatedContexts(), original.reviewStatus(),
+                Optional.of(reviewReference));
+        return new ListResult(template.documentRepositoryId(), template.repositoryId(), template.collectionPurpose(),
+                template.trust(), template.publicationStatus(), template.publicationErrorCode(), List.of(item),
+                template.page());
+    }
+
     private static String commitOwners(DocumentFixture fixture, Map<String, String> bodies) throws Exception {
         Map<String, byte[]> bytes = new LinkedHashMap<>();
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -427,6 +708,13 @@ class DocumentQueryBehaviorTest {
     }
     private static SearchResult search(QueryFixture query, Optional<String> owner, Optional<String> cursor, int limit) {
         return query.service.search(new SearchRequest("needle", limit, cursor, owner), value -> value);
+    }
+    private static ListResult list(QueryFixture query, Optional<String> owner, Optional<String> cursor, int limit) {
+        return query.service.list(new ListRequest(owner, limit, cursor), value -> value);
+    }
+    private static void assertInvalid(ThrowingCallable action) {
+        assertThatThrownBy(action).isInstanceOfSatisfying(DocumentFailure.class,
+                failure -> assertThat(failure.code()).isEqualTo(DocumentFailure.Code.INVALID_ARGUMENT));
     }
     private static void assertUnavailable(ThrowingCallable action) {
         assertThatThrownBy(action).isInstanceOfSatisfying(DocumentFailure.class,
@@ -457,5 +745,6 @@ class DocumentQueryBehaviorTest {
         }
     }
     private record MaterializedSearch(SearchResult result, McpSchema.CallToolResult wireResult) { }
+    private record MaterializedList(ListResult result, McpSchema.CallToolResult wireResult) { }
 
 }

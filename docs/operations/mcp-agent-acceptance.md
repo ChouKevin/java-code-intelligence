@@ -20,9 +20,9 @@ old answers or relabel historical results as new passes.
   不能把 Source Query 的 no-Git 規則錯套到 Document Query。
 - Indexer `/mcp` 使用 private admin token，提供 `prepare_source`、
   `prepare_semantic_index`、`get_job`。Source Query `/mcp` 使用 read token，提供
-  `list_repositories`、`get_context`、`list_files`、`search_text`、`read_source`、
-  `search_code`、`get_outline`、`list_entry_points`、`find_relations`。
-  Document MCP 使用自己的 read token，只有 `search_documents`、`read_document`。
+  `list_repositories`、`get_context`、`list_files`、`find_files`、`search_text`、
+  `read_source`、`search_code`、`get_outline`、`list_entry_points`、`find_relations`。
+  Document MCP 使用自己的 read token，提供 `list_documents`、`search_documents`、`read_document`。
 - 比對實際 HTTP body、MCP structuredContent 與 model-visible text 的成功／安全錯誤。
   一般 JSON text 應與 structured result 一致；成功 `read_source` 的 numbered display
   不是 JSON，不可拿 display 替代 raw structured bytes/digests。
@@ -67,6 +67,29 @@ old answers or relabel historical results as new passes.
    `*.class`）、symlink/binary/encoding/path/submodule/LFS unsupported 狀態。
    未授權／未知 SHA／timeout／busy 錯誤不洩漏 token、absolute path 或 source bytes。
 
+## 檔名／文件瀏覽與陌生專案探索
+
+- Source `find_files` 與 `search_text.filePattern` 使用同一 glob corpus：root／nested、
+  bare wildcard、literal path、零層 `**/`、巢狀 alternatives、classes／negation、
+  Unicode supplementary scalar 與 literal metacharacters。Invalid/over-limit
+  patterns 明確失敗；比較同一批 TEXT 檔案的實際 native search，不以 helper 自算答案。
+- filename pages 綁 exact context、pattern、directory、limit；current 更新後 retained A
+  仍完整列 A。UTF-8 ordering、完整 result byte budget、late corrupt inventory、
+  非 TEXT status、excluded/untracked/symlink 與 timeout/cancel cleanup 都須有行為證據。
+- 實際 Document MCP 無 query 的 `list_documents` 每文件一筆，global/scoped/empty
+  結果及回傳 entry 的完整 read 可用。A 更新讓 global/A cursor 失效，B 不受影響；
+  no-op、last-file removal、UPDATE_REJECTED、list/search token 互換與重啟要分別核對。
+- 外部 Query-only `gpt-6-luna` 以中性問題探索 Java/Maven multi-module 專案：
+  不預先提供答案、檔案路徑或入口清單。完成無 filter 的 repository catalog 分頁，
+  依必要文件導航後，以 find/list/read 取得用途、modules、候選入口、設定／測試位置。
+  非 Java 檔名／讀取也需實際命中；這不代表全語言語意理解。
+- 明確指定 retained A 而 current 為 B 時，所有該 repo 的 Source calls/citations
+  保持 A；文件仍為該 owner 最新有效版本。Missing/stale 文件回固定 source，
+  不把文件 provenance 當查詢版本，也不擅自比較其他歷史 source。
+- 初步概覽列出已讀／未讀及 UNKNOWN；要求完整清單才追完對應 source/document pages。
+  關聯 repo 按需要深讀，不預設全展開；build dependency 不等於 runtime wiring。
+  檢查每個 claim 的實際 raw 證據與完整 locator，不以工具數或最後一筆正確引用代替。
+
 ## Index 接受條件
 
 1. Source READY 後以另一个已保存 UUID 呼叫 `prepare_semantic_index`；新 work 的 exact
@@ -74,7 +97,7 @@ old answers or relabel historical results as new passes.
    Source/index 共用 per-repo active-job 與 requestId namespace。恢復 committed receipt
    不受後來 current 移動影響；核對 operation、publication receipt 與 generation。
 2. Source readiness、index metadata readiness 與 native runtime health 分開。
-   missing/incompatible/corrupt index 或 SQLite load failure 不破壞五個 source tools。
+   missing/incompatible/corrupt index 或 SQLite load failure 不破壞 source-only tools。
    用 fresh process 查 index-local failure 前後的 source；Indexer semantic failure 後仍可
    處理 source job。`get_context` 不 prepare，也不靠啟動 JDBC 假稱健康。
 3. `search_code` 只找 declaration name，`match: exact|prefix`、literal/case-sensitive；

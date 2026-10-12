@@ -137,6 +137,9 @@ class SourceReadLeaseTest {
             public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest request) {
                 return fixture.service().listFiles(admitted, request);
             }
+            public FileFindResult findFiles(AdmittedSourceRevision admitted, FileFindRequest request) {
+                return fixture.service().findFiles(admitted, request);
+            }
             public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request,
                     Function<Optional<String>, IndexContract.FoldResult> folds) {
                 return fixture.service().readSource(admitted, request, folds);
@@ -204,6 +207,9 @@ class SourceReadLeaseTest {
     private static RepositorySourcePort paused(RepositorySourcePort delegate, CountDownLatch entered, CountDownLatch resume, boolean fail) {
         return new RepositorySourcePort() {
             public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest request) { return delegate.listFiles(admitted, request); }
+            public FileFindResult findFiles(AdmittedSourceRevision admitted, FileFindRequest request) {
+                return delegate.findFiles(admitted, request);
+            }
             public TextSearchResult searchText(AdmittedSourceRevision admitted, TextSearchRequest request) { return delegate.searchText(admitted, request); }
             public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request,
                     Function<Optional<String>, IndexContract.FoldResult> folds) {

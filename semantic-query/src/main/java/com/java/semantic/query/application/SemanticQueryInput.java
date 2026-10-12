@@ -4,6 +4,7 @@ import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceReadContract;
 import com.java.semantic.model.source.SourceReadContract.ContextRequest;
 import com.java.semantic.model.source.SourceReadContract.FileListRequest;
+import com.java.semantic.model.source.SourceReadContract.FileFindRequest;
 import com.java.semantic.model.source.SourceReadContract.ReadSourceRequest;
 import com.java.semantic.model.source.SourceReadContract.RepositoryRequest;
 import com.java.semantic.model.source.SourceReadContract.TextSearchRequest;
@@ -22,6 +23,7 @@ public final class SemanticQueryInput {
     private static final Set<String> CONTEXT = Set.of("repositoryId", "revision");
     private static final Set<String> FILES = Set.of("context", "directory", "cursor", "limit", "depth");
     private static final Set<String> TEXT = Set.of("context", "query", "directory", "filePattern", "limit");
+    private static final Set<String> FIND = Set.of("context", "filePattern", "directory", "limit", "cursor");
     private static final Set<String> SOURCE = Set.of("context", "path", "view", "startLine", "ranges",
             "tailLines", "maxLines", "contextBefore", "contextAfter", "indexGeneration", "cursor");
     private static final Set<String> SOURCE_CONTEXT = Set.of("repositoryId", "revision");
@@ -57,6 +59,13 @@ public final class SemanticQueryInput {
         fields(input, FILES);
         return new FileListRequest(readContext(input.get("context")), optionalString(input, "directory").orElse(""),
                 integer(input, "depth", 1), integer(input, "limit", SourceReadContract.DEFAULT_PAGE_LIMIT), optionalString(input, "cursor"));
+    }
+
+    public static FileFindRequest findFiles(Map<String, ?> input) {
+        fields(input, FIND);
+        return new FileFindRequest(readContext(input.get("context")), string(input, "filePattern"),
+                optionalString(input, "directory").orElse(""),
+                integer(input, "limit", SourceReadContract.DEFAULT_PAGE_LIMIT), optionalString(input, "cursor"));
     }
 
     public static TextSearchRequest searchText(Map<String, ?> input) {

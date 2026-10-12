@@ -11,6 +11,7 @@ import tools.jackson.databind.ObjectMapper;
 /** One admitted revision per operation; the caller obtains it from SourceRevisionCatalog. */
 public final class LocalRepositorySourceService implements RepositorySourcePort {
     private final BoundedDirectoryReader directories;
+    private final BoundedFileFinder finder;
     private final BoundedSourceReader reader;
     private final RipgrepTextSearch search;
 
@@ -20,11 +21,17 @@ public final class LocalRepositorySourceService implements RepositorySourcePort 
         this.reader = new BoundedSourceReader(properties, resolver, mapper);
         this.search = new RipgrepTextSearch(properties, resolver, mapper);
         this.directories = new BoundedDirectoryReader(properties, mapper);
+        this.finder = new BoundedFileFinder(properties, mapper);
     }
 
     @Override
     public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest request) {
         return directories.read(admitted, request);
+    }
+
+    @Override
+    public FileFindResult findFiles(AdmittedSourceRevision admitted, FileFindRequest request) {
+        return finder.find(admitted, request);
     }
 
     @Override

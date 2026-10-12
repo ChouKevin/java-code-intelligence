@@ -291,7 +291,37 @@ the separately preserved old selection do not change.
 
 Register a **second** MCP server at this service's `/mcp` URL, with `X-Api-Token` sourced from `DOCUMENT_QUERY_API_TOKEN`. Give query agents only this read surface and the separate Source Query MCP, never Indexer admin access. Project instructions/the query skill tell the client when to use document navigation; tool registration alone does not guarantee natural-language triggering.
 
-The endpoint is stateless WebMVC MCP with exactly two read-only tools. Every `/mcp` request is authenticated; wrong/missing credentials receive HTTP401 before catalog/tool access. It does not share Source Query's initialized session or session ID. `/actuator/health` is minimal liveness without catalog/source details; other application routes are denied. There is no REST business API or MCP write tool. Executable schemas live in `document-query/src/main/resources/document-tools.json`, separately from Source Query OpenAPI.
+The endpoint is stateless WebMVC MCP exposing read-only `list_documents`, `search_documents` and `read_document`. Every `/mcp` request is authenticated; wrong/missing credentials receive HTTP401 before catalog/tool access. It does not share Source Query's initialized session or session ID. `/actuator/health` is minimal liveness without catalog/source details; other application routes are denied. There is no REST business API or MCP write tool. Executable schemas live in `document-query/src/main/resources/document-tools.json`, separately from Source Query OpenAPI.
+
+### list_documents
+
+Use this when no keyword is known. Arguments are optional `repositoryId`,
+`limit` (default10, maximum20) and `cursor`; no query/revision/path selector.
+Omitted owner browses all effective owners; a valid unknown owner succeeds empty.
+Each document appears once, ordered by existing Java String full-path order.
+There is no body, snippet, historical membership or new stored catalog.
+
+The envelope uses the same owner/publication/trust/page metadata as search.
+Each row includes its full `documentContext`, `path`, `contentDigest`,
+`byteLength`, first actual `section {startLine,title,titleTruncated}`,
+`primaryContext`, `relatedContexts` and review metadata. A headingless prefix
+uses its real line1 entry, not an invented title. Pass that exact context/path
+and section.startLine to `read_document`; it returns the complete document.
+Global rows may contain different owner commits; there is no global document SHA.
+
+Keep scope and requested limit unchanged with the next cursor. Listing/search
+tokens are operation-bound and cannot be interchanged. Effective owner-map
+changes expire global lists; only the changed owner's scoped lists expire.
+An unchanged B context/page remains valid after A updates, and no-op publication
+does not expire either scope. Stale versions return
+`DOCUMENT_REVISION_NOT_AVAILABLE`; tamper, changed parameters, cross-operation
+tokens or process restart return `INVALID_ARGUMENT`. A fresh query observes
+the actual latest effective map, including last-good `UPDATE_REJECTED`.
+
+Complete rows may be trimmed for the512KiB full result budget; continue with
+the original limit to obtain the first omitted document. A single row/envelope
+that cannot fit fails explicitly. Listing shares existing operation permits,
+deadlines and read-lease ownership through complete result materialization.
 
 ### search_documents
 
@@ -324,7 +354,7 @@ cursor. A scoped cursor binds only that owner's effective full document SHA; a
 global cursor binds the canonical active owner map. Any effective owner addition,
 update or removal expires a global cursor; a scoped cursor expires only when its
 owner changes. An identical owner no-op does not expire either scope. Cursor
-scope/query/limit are authenticated; tampering, changed bindings or process
+operation/scope/query/limit are authenticated; tampering, changed bindings or process
 restart return `INVALID_ARGUMENT`, while a changed effective scope returns
 `DOCUMENT_REVISION_NOT_AVAILABLE`. Do not rewrite the token or context. Whole
 trailing hits may be trimmed for response budget; continuation points to the
@@ -333,7 +363,7 @@ first omitted hit and retains the original requested limit.
 ### read_document
 
 Arguments: complete `documentContext {documentRepositoryId,repositoryId,documentRevision}`,
-`path`, and `sectionStartLine` copied from a hit. The context must identify the
+`path`, and `sectionStartLine` copied from a listing row or search hit. The context must identify the
 central document repository and exact effective commit for that path's owner.
 Every locator is required; the path must be owned by the context and the line
 must be an actual section boundary. No nearest-section guess or current fallback.
@@ -359,14 +389,14 @@ Application errors return `isError:true` with `{code,message}` in matching text/
 | Related source contexts per document | 32 |
 | Heading / snippet Unicode code points | 160 / 240 |
 | Query Unicode code points | 1–128, nonblank |
-| Search limit | 1–20, default10 |
+| Listing / search limit | 1–20, default10 |
 | HTTP request body, including chunked | 16KiB |
 | Cursor bytes | 4KiB |
 | Complete serialized MCP result | 512KiB, text plus structured envelope |
 | Active operations | 2; third immediately DOCUMENT_BUSY |
 | Cooperative operation / subscribed tool-response timeout | 5s / 10s |
 
-The single cooperative deadline covers selection observation, lock waiting, reload, search/read and synchronous complete-result size checking. Expired/cancelled work does not publish an expired candidate or serve an expired result. The installed SDK2.0.0 stateless `requestTimeout` setting is not enforced by that SDK; the service instead uses supported stateless async tool registration with an owned ten-second response timer. The underlying query/materializer remains synchronous under its original resources. Two owned workers have no waiting work queue; rejected work returns `DOCUMENT_BUSY`.
+The single cooperative deadline covers selection observation, lock waiting, reload, listing/search/read and synchronous complete-result size checking. Expired/cancelled work does not publish an expired candidate or serve an expired result. The installed SDK2.0.0 stateless `requestTimeout` setting is not enforced by that SDK; the service instead uses supported stateless async tool registration with an owned ten-second response timer. The underlying query/materializer remains synchronous under its original resources. Two owned workers have no waiting work queue; rejected work returns `DOCUMENT_BUSY`.
 
 Timeout returns a sanitized `DOCUMENT_TIMEOUT` and requests interruption, but permits/leases remain held until actual work exits. Local filesystem/JGit calls cannot be forcibly interrupted; response timeout is not a hard wall-clock worker-kill guarantee. Shutdown drains actual workers before closing their Git loader, so a non-returning filesystem call can delay shutdown rather than closing Git underneath it. Stateless cancellation notifications are acknowledged by the SDK without an active-request cancellation handler; acknowledgement does not prove interruption of another request.
 

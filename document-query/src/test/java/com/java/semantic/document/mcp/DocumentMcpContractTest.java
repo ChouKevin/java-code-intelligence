@@ -59,6 +59,79 @@ class DocumentMcpContractTest {
     }
 
     @Test
+    void keyword_free_listing_returns_one_document_with_a_usable_read_entry() throws Exception {
+        JsonNode listing = result("list_documents", Map.of()).path("structuredContent");
+        assertThat(listing.path("items").size()).isEqualTo(1);
+        JsonNode item = listing.path("items").get(0);
+        assertThat(item.path("path").stringValue()).isEqualTo(DocumentFixture.GUIDE);
+        assertThat(item.path("documentContext").path("documentRevision").stringValue()).isEqualTo(revision);
+        assertThat(item.has("content")).isFalse();
+        JsonNode read = result("read_document", Map.of("documentContext", item.path("documentContext"),
+                "path", item.path("path").stringValue(), "sectionStartLine", item.path("section").path("startLine").asInt()));
+        assertThat(read.path("structuredContent").path("content").stringValue()).isEqualTo(content);
+    }
+
+    @Test
+    void listDocumentsExposeCompleteMetadataAndRejectNonListArguments() throws Exception {
+        JsonNode response = result("list_documents", Map.of());
+        assertRepresentations(response);
+        assertThat(response.path("isError").asBoolean()).isFalse();
+        JsonNode listing = response.path("structuredContent");
+        assertThat(listing.path("documentRepositoryId").stringValue()).isEqualTo(DocumentFixture.DOCUMENT_REPOSITORY);
+        assertThat(listing.has("repositoryId")).isFalse();
+        assertThat(listing.path("collectionPurpose").stringValue()).isEqualTo("TEST_ONLY");
+        assertThat(listing.path("trust").stringValue()).isEqualTo("NOT_VERIFIED");
+        assertThat(listing.path("publicationStatus").stringValue()).isEqualTo("READY");
+        assertThat(listing.path("page").path("returned").intValue()).isEqualTo(1);
+        assertThat(listing.path("page").path("hasMore").booleanValue()).isFalse();
+        assertThat(listing.path("items").size()).isEqualTo(1);
+        JsonNode item = listing.path("items").get(0);
+        assertThat(item.path("documentContext").path("documentRevision").stringValue()).isEqualTo(revision);
+        assertThat(item.path("path").stringValue()).isEqualTo(DocumentFixture.GUIDE);
+        assertThat(item.path("contentDigest").stringValue()).hasSize(64);
+        assertThat(item.path("byteLength").intValue()).isEqualTo(content.getBytes(StandardCharsets.UTF_8).length);
+        assertThat(item.path("section").path("startLine").intValue()).isEqualTo(1);
+        assertThat(item.path("section").path("title").stringValue()).isEqualTo("Evidence");
+        assertThat(item.path("primaryContext").path("repositoryId").stringValue()).isEqualTo("sample");
+        assertThat(item.path("relatedContexts").isArray()).isTrue();
+        assertThat(item.path("reviewStatus").stringValue()).isEqualTo("DRAFT");
+        assertThat(item.has("content")).isFalse();
+        assertThat(item.has("snippet")).isFalse();
+
+        JsonNode tools = json(rpc("tools/list", Map.of(), true)).path("result").path("tools");
+        JsonNode listTool = tool(tools, "list_documents");
+        JsonNode inputSchema = listTool.path("inputSchema");
+        assertThat(inputSchema.path("additionalProperties").booleanValue()).isFalse();
+        assertThat(inputSchema.path("required").size()).isZero();
+        assertThat(inputSchema.path("properties").has("repositoryId")).isTrue();
+        assertThat(inputSchema.path("properties").has("limit")).isTrue();
+        assertThat(inputSchema.path("properties").has("cursor")).isTrue();
+        assertThat(inputSchema.path("properties").has("query")).isFalse();
+        assertThat(inputSchema.path("properties").has("documentContext")).isFalse();
+        JsonNode listSchema = listTool.path("outputSchema");
+        JsonNode successSchema = listSchema.path("oneOf").get(0);
+        assertSchemaFields(listing, successSchema);
+        assertSchemaFields(item, listSchema.path("$defs").path("listItem"));
+        assertSchemaFields(item.path("documentContext"), listSchema.path("$defs").path("documentContext"));
+        assertSchemaFields(item.path("section"), listSchema.path("$defs").path("section"));
+        assertSchemaFields(item.path("primaryContext"), listSchema.path("$defs").path("sourceContext"));
+
+        JsonNode unknown = result("list_documents", Map.of("repositoryId", "absent"));
+        assertRepresentations(unknown);
+        assertThat(unknown.path("isError").asBoolean()).isFalse();
+        assertThat(unknown.path("structuredContent").path("repositoryId").stringValue()).isEqualTo("absent");
+        assertThat(unknown.path("structuredContent").path("items").isEmpty()).isTrue();
+
+        Map<String, Object> explicitNull = new LinkedHashMap<>();
+        explicitNull.put("limit", null);
+        for (Map<String, Object> invalid : List.<Map<String, Object>>of(Map.of("query", "needle"),
+                Map.of("includeUnpublished", true), Map.of("limit", 1.5), explicitNull,
+                Map.of("repositoryId", "Invalid"))) {
+            assertError(result("list_documents", invalid), "INVALID_ARGUMENT");
+        }
+    }
+
+    @Test
     void statelessInitializeDiscoveryAndCompleteReadPreserveIndependentIdentities() throws Exception {
         HttpResponse<String> initialized = rpc("initialize", Map.of("protocolVersion", "2025-03-26",
                 "capabilities", Map.of(), "clientInfo", Map.of("name", "contract", "version", "1")), true);
@@ -69,7 +142,6 @@ class DocumentMcpContractTest {
         assertThat(capabilities.has("resources")).isFalse();
         assertThat(capabilities.has("prompts")).isFalse();
         JsonNode tools = json(rpc("tools/list", Map.of(), true)).path("result").path("tools");
-        assertThat(tools.size()).isEqualTo(2);
         assertThat(tools.get(0).path("inputSchema").path("additionalProperties").asBoolean(true)).isFalse();
         assertThat(tools.get(0).has("outputSchema")).isTrue();
         JsonNode search = result("search_documents", Map.of("query", "literal.* 文"));
@@ -268,6 +340,13 @@ class DocumentMcpContractTest {
         }
         return fixture.mapper.readTree(body);
     }
+    private JsonNode tool(JsonNode tools, String name) {
+        for (JsonNode candidate : tools) {
+            if (name.equals(candidate.path("name").stringValue())) { return candidate; }
+        }
+        throw new AssertionError("MCP tool not registered: " + name);
+    }
+
     private JsonNode result(String name, Map<String, Object> arguments) throws Exception {
         JsonNode response = json(rpc("tools/call", Map.of("name", name, "arguments", arguments), true));
         assertThat(response.has("error")).isFalse();

@@ -36,15 +36,24 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
         String second;
         String rejected;
         String oldCursor;
+        String globalListCursor;
+        String aListCursor;
+        String bListCursor;
         String body = "# HIT A\r\n舊規則\r\n# HIT B\r\n尾端";
         try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
                 DocumentFixture fixture = new DocumentFixture(work.resolve("documents"))) {
+            String aOverviewPath = "repositories/sample/description.md";
             String bPath = "repositories/b/guide.md";
+            String bOverviewPath = "repositories/b/overview.md";
             byte[] aBytes = body.getBytes(StandardCharsets.UTF_8);
+            byte[] aOverviewBytes = "# HIT A overview\r\nA metadata".getBytes(StandardCharsets.UTF_8);
             byte[] bBytes = "# HIT B1\r\nB evidence\r\n# HIT More\r\nB continuation".getBytes(StandardCharsets.UTF_8);
-            first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, aBytes, bPath, bBytes),
-                    List.of(fixture.row(DocumentFixture.GUIDE, aBytes),
-                            fixture.row(bPath, bBytes, new SourceContext("b", DocumentFixture.SOURCE_REVISION))));
+            byte[] bOverviewBytes = "# HIT B overview\r\nB summary".getBytes(StandardCharsets.UTF_8);
+            first = fixture.commitBytes(Map.of(DocumentFixture.GUIDE, aBytes, aOverviewPath, aOverviewBytes,
+                    bPath, bBytes, bOverviewPath, bOverviewBytes),
+                    List.of(fixture.row(DocumentFixture.GUIDE, aBytes), fixture.row(aOverviewPath, aOverviewBytes),
+                            fixture.row(bPath, bBytes, new SourceContext("b", DocumentFixture.SOURCE_REVISION)),
+                            fixture.row(bOverviewPath, bOverviewBytes, new SourceContext("b", DocumentFixture.SOURCE_REVISION))));
             fixture.publish(Map.of("sample", first, "b", first));
             ObjectId firstBlob = Objects.requireNonNull(fixture.git.getRepository().resolve(first + ":" + DocumentFixture.GUIDE));
             byte[] original = fixture.git.getRepository().open(firstBlob).getBytes();
@@ -60,14 +69,46 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                     names.add(tool.path("name").stringValue());
                     assertThat(tool.path("annotations").path("readOnlyHint").booleanValue()).isTrue();
                 }
-                assertThat(names).containsExactlyInAnyOrder("search_documents", "read_document");
-                checks.add("only two real read-only MCP tools listed");
+                assertThat(names).contains("search_documents", "read_document", "list_documents");
+                checks.add("required real read-only MCP tools listed");
                 JsonNode page = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
                 assertSuccess(page);
                 JsonNode pageData = page.path("structuredContent");
                 assertThat(pageData.path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(first);
                 oldCursor = pageData.path("page").path("nextCursor").stringValue();
                 assertThat(pageData.path("items").get(0).path("section").path("startLine").intValue()).isEqualTo(1);
+                JsonNode globalList = call(client, service.uri, token, "list_documents", Map.of("limit", 1));
+                assertSuccess(globalList);
+                JsonNode globalListData = globalList.path("structuredContent");
+                JsonNode globalListItem = globalListData.path("items").get(0);
+                assertThat(globalListItem.path("path").stringValue()).isEqualTo(bPath);
+                assertThat(globalListItem.path("documentContext").path("repositoryId").stringValue()).isEqualTo("b");
+                assertThat(globalListItem.has("content")).isFalse();
+                assertThat(globalListData.path("page").path("hasMore").booleanValue()).isTrue();
+                globalListCursor = globalListData.path("page").path("nextCursor").stringValue();
+                JsonNode aList = call(client, service.uri, token, "list_documents",
+                        Map.of("repositoryId", "sample", "limit", 1));
+                assertSuccess(aList);
+                assertThat(aList.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(aOverviewPath);
+                aListCursor = aList.path("structuredContent").path("page").path("nextCursor").stringValue();
+                JsonNode bList = call(client, service.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1));
+                assertSuccess(bList);
+                assertThat(bList.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(bPath);
+                bListCursor = bList.path("structuredContent").path("page").path("nextCursor").stringValue();
+                assertError(call(client, service.uri, token, "list_documents", Map.of("limit", 1, "cursor", oldCursor)),
+                        "INVALID_ARGUMENT");
+                assertError(call(client, service.uri, token, "search_documents",
+                        Map.of("query", "HIT", "limit", 1, "cursor", globalListCursor)), "INVALID_ARGUMENT");
+                JsonNode listRead = call(client, service.uri, token, "read_document",
+                        readArguments("b", first, bPath, globalListItem.path("section").path("startLine").intValue()));
+                assertSuccess(listRead);
+                assertThat(listRead.path("structuredContent").path("content").stringValue().getBytes(StandardCharsets.UTF_8))
+                        .isEqualTo(bBytes);
+                checks.add("keyword-free global/scoped listing pages list each document and open a returned full-read entry");
+
                 JsonNode bPage = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "b"));
                 assertSuccess(bPage);
                 String bCursor = bPage.path("structuredContent").path("page").path("nextCursor").stringValue();
@@ -84,11 +125,60 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 assertThat(data.path("reviewStatus").stringValue()).isEqualTo("DRAFT");
                 assertThat(data.path("collectionPurpose").stringValue()).isEqualTo("TEST_ONLY");
                 checks.add("full document bytes/CRLF/EOF/blob/digest and test-only provenance match real Git");
-                second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# HIT Updated\n新規則"));
+                second = fixture.commit(Map.of(DocumentFixture.GUIDE, "# HIT Updated\n新規則",
+                        aOverviewPath, "# HIT overview updated\nNew metadata"));
                 fixture.publish(Map.of("sample", second, "b", first));
                 JsonNode current = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "repositoryId", "sample"));
                 assertSuccess(current);
                 assertThat(current.path("structuredContent").path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
+                assertError(call(client, service.uri, token, "list_documents",
+                        Map.of("limit", 1, "cursor", globalListCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                assertError(call(client, service.uri, token, "list_documents",
+                        Map.of("repositoryId", "sample", "limit", 1, "cursor", aListCursor)),
+                        "DOCUMENT_REVISION_NOT_AVAILABLE");
+                JsonNode bListContinued = call(client, service.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1, "cursor", bListCursor));
+                assertSuccess(bListContinued);
+                assertThat(bListContinued.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(bOverviewPath);
+                assertThat(bListContinued.path("structuredContent").path("items").get(0).path("documentContext")
+                        .path("documentRevision").stringValue()).isEqualTo(first);
+                JsonNode mixedList = call(client, service.uri, token, "list_documents", Map.of());
+                assertSuccess(mixedList);
+                JsonNode mixedListData = mixedList.path("structuredContent");
+                assertThat(mixedListData.has("documentRevision")).isFalse();
+                List<String> mixedPaths = new ArrayList<>();
+                List<String> mixedRevisions = new ArrayList<>();
+                for (JsonNode item : mixedListData.path("items")) {
+                    mixedPaths.add(item.path("path").stringValue());
+                    mixedRevisions.add(item.path("documentContext").path("documentRevision").stringValue());
+                }
+                assertThat(mixedPaths).containsExactly(bPath, bOverviewPath, aOverviewPath, DocumentFixture.GUIDE);
+                assertThat(mixedRevisions).containsExactly(first, first, second, second);
+
+                JsonNode freshGlobalList = call(client, service.uri, token, "list_documents", Map.of("limit", 1));
+                JsonNode freshAList = call(client, service.uri, token, "list_documents",
+                        Map.of("repositoryId", "sample", "limit", 1));
+                JsonNode freshBList = call(client, service.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1));
+                fixture.publish(Map.of("sample", second, "b", first));
+                JsonNode noOpGlobal = call(client, service.uri, token, "list_documents", Map.of("limit", 1,
+                        "cursor", freshGlobalList.path("structuredContent").path("page").path("nextCursor").stringValue()));
+                JsonNode noOpA = call(client, service.uri, token, "list_documents", Map.of("repositoryId", "sample", "limit", 1,
+                        "cursor", freshAList.path("structuredContent").path("page").path("nextCursor").stringValue()));
+                JsonNode noOpB = call(client, service.uri, token, "list_documents", Map.of("repositoryId", "b", "limit", 1,
+                        "cursor", freshBList.path("structuredContent").path("page").path("nextCursor").stringValue()));
+                assertSuccess(noOpGlobal);
+                assertSuccess(noOpA);
+                assertSuccess(noOpB);
+                assertThat(noOpGlobal.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(bOverviewPath);
+                assertThat(noOpA.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(DocumentFixture.GUIDE);
+                assertThat(noOpB.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(bOverviewPath);
+                checks.add("owner-scoped list cursors retain B and a no-op selection preserves all fresh list cursors");
+
                 assertError(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", oldCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
                 assertError(call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "sample", "cursor", aCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
                 JsonNode continued = call(client, service.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "repositoryId", "b", "cursor", bCursor));
@@ -110,6 +200,17 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 assertThat(preserved.path("structuredContent").path("items").get(0).path("documentContext").path("documentRevision").stringValue()).isEqualTo(second);
                 assertThat(preserved.path("structuredContent").path("publicationStatus").stringValue()).isEqualTo("UPDATE_REJECTED");
                 assertThat(preserved.path("structuredContent").path("publicationErrorCode").stringValue()).isEqualTo("DOCUMENT_CATALOG_INVALID");
+                JsonNode preservedList = call(client, service.uri, token, "list_documents", Map.of("limit", 10));
+                assertSuccess(preservedList);
+                JsonNode lastGoodList = preservedList.path("structuredContent");
+                assertThat(lastGoodList.path("publicationStatus").stringValue()).isEqualTo("UPDATE_REJECTED");
+                assertThat(lastGoodList.path("publicationErrorCode").stringValue()).isEqualTo("DOCUMENT_CATALOG_INVALID");
+                List<String> lastGoodRevisions = new ArrayList<>();
+                for (JsonNode item : lastGoodList.path("items")) {
+                    lastGoodRevisions.add(item.path("documentContext").path("documentRevision").stringValue());
+                }
+                assertThat(lastGoodRevisions).containsExactly(first, first, second, second);
+                checks.add("keyword-free listing preserves rejected-publication status and last-good owner revisions");
                 checks.add("invalid D3 preserves actual D2 identity with explicit rejected status");
             }
             try (OwnedService invalidRestart = new OwnedService(jar, fixture, token, work.resolve("invalid-restart.log"))) {
@@ -123,6 +224,8 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 initialize(client, restarted.uri, token);
                 JsonNode staleCursor = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", oldCursor));
                 assertError(staleCursor, "INVALID_ARGUMENT");
+                assertError(call(client, restarted.uri, token, "list_documents",
+                        Map.of("limit", 1, "cursor", globalListCursor)), "INVALID_ARGUMENT");
                 JsonNode exact = call(client, restarted.uri, token, "read_document", readArguments("b", first, bPath, 1));
                 assertSuccess(exact);
                 assertThat(exact.path("structuredContent").path("content").stringValue().getBytes(StandardCharsets.UTF_8)).isEqualTo(bBytes);
@@ -130,14 +233,42 @@ class DocumentMcpJourneyIT extends DocumentJourneySupport {
                 checks.add("valid restart restores current B exact bytes but rejects old process cursor and old A locator");
                 JsonNode fresh = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1));
                 String pinned = fresh.path("structuredContent").path("page").path("nextCursor").stringValue();
+                JsonNode beforeOwnerRemovalGlobal = call(client, restarted.uri, token, "list_documents", Map.of("limit", 1));
+                String beforeOwnerRemovalCursor = beforeOwnerRemovalGlobal.path("structuredContent").path("page")
+                        .path("nextCursor").stringValue();
+                JsonNode beforeOwnerRemovalB = call(client, restarted.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1));
+                String beforeOwnerRemovalBCursor = beforeOwnerRemovalB.path("structuredContent").path("page")
+                        .path("nextCursor").stringValue();
                 fixture.publish(Map.of("b", first));
                 assertError(call(client, restarted.uri, token, "read_document", readArguments(second, 1)), "DOCUMENT_REVISION_NOT_AVAILABLE");
                 assertError(call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT", "limit", 1, "cursor", pinned)), "DOCUMENT_REVISION_NOT_AVAILABLE");
                 assertSuccess(call(client, restarted.uri, token, "read_document", readArguments("b", first, bPath, 1)));
+                assertError(call(client, restarted.uri, token, "list_documents",
+                        Map.of("limit", 1, "cursor", beforeOwnerRemovalCursor)), "DOCUMENT_REVISION_NOT_AVAILABLE");
+                JsonNode continuedBList = call(client, restarted.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1, "cursor", beforeOwnerRemovalBCursor));
+                assertSuccess(continuedBList);
+                assertThat(continuedBList.path("structuredContent").path("items").get(0).path("path").stringValue())
+                        .isEqualTo(bOverviewPath);
+                JsonNode beforeLastOwnerRemoval = call(client, restarted.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1));
+                String lastOwnerCursor = beforeLastOwnerRemoval.path("structuredContent").path("page")
+                        .path("nextCursor").stringValue();
                 fixture.publish(Map.of());
                 JsonNode empty = call(client, restarted.uri, token, "search_documents", Map.of("query", "HIT"));
                 assertSuccess(empty);
                 assertThat(empty.path("structuredContent").path("items").isEmpty()).isTrue();
+                assertError(call(client, restarted.uri, token, "list_documents",
+                        Map.of("repositoryId", "b", "limit", 1, "cursor", lastOwnerCursor)),
+                        "DOCUMENT_REVISION_NOT_AVAILABLE");
+                JsonNode emptyList = call(client, restarted.uri, token, "list_documents", Map.of());
+                assertSuccess(emptyList);
+                assertThat(emptyList.path("structuredContent").path("items").isEmpty()).isTrue();
+                assertThat(emptyList.path("structuredContent").path("page").path("returned").intValue()).isZero();
+                assertThat(call(client, restarted.uri, token, "list_documents",
+                        Map.of("repositoryId", "b")).path("structuredContent").path("items").isEmpty()).isTrue();
+                checks.add("A removal preserves B list continuation; last-owner removal expires B and leaves a successful empty list");
                 checks.add("owner removal and empty selection expire locators without deleting historical Git objects");
             }
             OwnedService interruptedOwner = new OwnedService(jar, fixture, token, work.resolve("interrupted-owner.log"));

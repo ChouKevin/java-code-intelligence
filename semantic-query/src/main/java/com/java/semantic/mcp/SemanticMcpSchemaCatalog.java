@@ -37,11 +37,18 @@ public final class SemanticMcpSchemaCatalog {
                     "limit", integer(1, 100, 20, "Maximum entries returned; default 20, range 1–100."),
                     "cursor", field(text(), "Opaque continuation cursor bound to the exact source context and directory.")),
                     List.of("context"), "Browse one exact published source revision; unknown properties are rejected.");
+            case "find_files" -> input(properties(
+                    "context", field(context(), "Required exact repositoryId and full lowercase SHA from get_context; never inferred or retargeted."),
+                    "filePattern", field(text(), "Required glob policy 1, identical to search_text.filePattern: case-sensitive Unicode scalar paths with / separator; pom.xml root-only, *.java equals **/*.java, src/**/*.java includes direct/deep paths; directory never rebases. Supports *, ?, scalar classes/ranges/[!negation] (^ literal, hyphen literal at class edges), whole-segment ** (zero-directory **/, descendant /**), nested positive alternatives and escaped literal metacharacters * ? [ ] { } ! comma; class metacharacters may be escaped. Spaces/semicolons literal. Limits: 256 scalars, brace depth4, 64 expansions, 8192 states, 65536 generated native UTF-8 bytes including separators. INVALID_ARGUMENT for malformed/empty/single alternatives, descending ranges, POSIX classes/numeric expansion/extglob, leading exclusion !, embedded ** or ***, controls/invalid Unicode, absolute/drive/URI paths, empty/dot/traversal segments/trailing separator and unsupported/dangling escapes; decoded backslash invalid. No repair/fallback; absent/excluded selections succeed empty."),
+                    "directory", field(string(), "Literal repository-relative subtree, empty root default; narrows without rebasing."),
+                    "limit", integer(1, 100, 20, "Maximum file rows per page, default20/max100; wire budget may return fewer."),
+                    "cursor", field(text(), "Authenticated process-lifetime continuation bound to operation, glob policy, exact context/manifest, original pattern, directory and limit; preserve all fields. After restart begin again at the same exact retained pin.")),
+                    List.of("context", "filePattern"), "Browse FILE membership only at any depth; no content read/index required. Unknown fields/null/wrong types fail; shared search capacity and five-second deadline, no partial timeout.");
             case "search_text" -> input(properties(
                     "context", field(context(), "Exact repositoryId and full lowercase commit SHA returned by get_context."),
                     "query", field(literalQuery(), "Required literal, case-sensitive source text; 1–256 Unicode code points, with no CR, LF, or NUL."),
                     "directory", field(string(), "Optional repository-relative directory subtree; empty string selects the root."),
-                    "filePattern", field(text(), "Optional positive repository-relative file glob; negated patterns are not accepted."),
+                    "filePattern", field(text(), "Optional glob policy 1: case-sensitive complete repository-relative paths, / separator, no normalization. pom.xml is root-only; *.java equals **/*.java; src/**/*.java includes direct and nested files. directory narrows without rebasing. * matches segment scalars, ? and [abc]/[a-z]/[!a-z] match one Unicode scalar; ^ is literal. ** is a whole segment, **/ permits zero directories and terminal /** selects descendants. Positive braces may nest and flatten; literal brace branches remain root-only. Backslash escapes * ? [ ] { } ! comma and backslash, but decoded backslash is invalid. Spaces/semicolons are literal. Limits: 256 scalars, brace depth 4, 64 expansions, 8192 matcher states, 65536 generated native UTF-8 bytes including separators. INVALID_ARGUMENT for malformed/empty/single braces, descending ranges, POSIX classes, numeric expansion, extglob, leading exclusion !, embedded ** or ***, controls, invalid Unicode, absolute/drive/URI paths, empty/dot/traversal segments, trailing slash or dangling/unsupported escapes. Valid absent/excluded selections succeed empty."),
                     "limit", integer(1, 100, 20, "Maximum matches returned; default 20, range 1–100.")),
                     List.of("context", "query"), "Search source occurrences, not declaration names or syntax; unknown properties are rejected.");
             case "read_source" -> input(properties(
@@ -117,6 +124,11 @@ public final class SemanticMcpSchemaCatalog {
                     "items", field(array(fileEntry()), "File and directory entries in this page."),
                     "page", field(page(), "Page count and cursor bound to this source context and directory.")),
                     List.of("context", "items", "page"), "Published source directory page.");
+            case "find_files" -> object(properties(
+                    "context", field(context(), "Exact source identity, unchanged across current advances."),
+                    "items", field(array(foundFile()), "One row per matching admitted FILE, unsigned-UTF-8 path order; includes non-TEXT status without body reads."),
+                    "page", field(page(), "Returned row count and continuation; follow all pages for complete selection. Complete HTTP/MCP result is bounded to 524288 bytes.")),
+                    List.of("context", "items", "page"), "Bounded exact-source file discovery; no total count or readiness inference.");
             case "search_text" -> object(properties(
                     "context", field(context(), "The exact source identity searched."),
                     "matches", field(array(textMatch()), "Literal source occurrences, not declaration-name matches."),
@@ -312,6 +324,15 @@ public final class SemanticMcpSchemaCatalog {
                 "tabSize", field(integerValue(1, Integer.MAX_VALUE, "Tab width used by the parser profile."), "Parser tab width in columns.")),
                 List.of("schemaVersion", "policyVersion", "engine", "version", "languageLevel", "unicodeEscapes", "tabSize"), "Index parser profile.");
     }
+    private static Map<String, Object> foundFile() {
+        return object(properties(
+                "path", field(text(), "Complete repository-relative file path; directory does not rebase it."),
+                "status", field(enums(EntryStatus.values(), "Published source status."), "Not a claim that the body is readable."),
+                "byteLength", field(count("Published byte length."), "Source inventory byte length."),
+                "navigationHint", field(bool("Whether this TEXT path is the published project guide."), "NOT_VERIFIED navigation metadata.")),
+                List.of("path", "status", "byteLength", "navigationHint"), "Published FILE metadata, never content or directory preview.");
+    }
+
 
     private static Map<String, Object> indexCoverage() {
         return object(properties(
